@@ -56,7 +56,9 @@
     #define USER_TEMPLATE "{\"NAME\":\"Nodemcu\",\"GPIO\":[1,1,1,1,1,1,1,1,1,1,1,1,1,1],\"FLAG\":0,\"BASE\":18}"  // [Template] Set JSON template
 #endif  // ESP8266
 #ifdef ESP32
-#define FALLBACK_MODULE        WEMOS             // [Module2] Select default module on fast reboot where USER_MODULE is user template
+  #undef  STA_SSID1
+  #undef  STA_PASS1
+  #define FALLBACK_MODULE        WEMOS             // [Module2] Select default module on fast reboot where USER_MODULE is user template
   #define USER_TEMPLATE "{\"NAME\":\"Olimex ESP32-PoE\",\"GPIO\":[1,1,1,1,1,1,0,0,5536,1,1,1,1,0,5600,0,0,0,0,5568,0,0,0,0,0,0,0,0,1,1,1,1,1,0,0,1],\"FLAG\":0,\"BASE\":1}"  // [Template] Set JSON template
 #endif  // ESP32
 
