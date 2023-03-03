@@ -138,6 +138,9 @@ void MPU_6050Detect(void)
     }
 #else
     mpu6050.initialize();
+    mpu6050.setFullScaleGyroRange(MPU6050_GYRO_FS_250);
+    mpu6050.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
+    mpu6050.setSleepEnabled(false); // thanks to Jack Elston for pointing this one out!
     mpu6050.CalibrateAccel(10);
     mpu6050.CalibrateGyro(10);
     MPU_6050_found = mpu6050.testConnection();
