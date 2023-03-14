@@ -42,6 +42,7 @@ uint8_t MPU_6050_found;
 int16_t MPU_6050_ax = 0, MPU_6050_ay = 0, MPU_6050_az = 0;
 int16_t MPU_6050_gx = 0, MPU_6050_gy = 0, MPU_6050_gz = 0;
 int16_t MPU_6050_temperature = 0;
+int16_t MPU_6050_motion = 0;
 
 #ifdef USE_MPU6050_DMP
   #include "MPU6050_6Axis_MotionApps20.h"
@@ -87,6 +88,7 @@ void MPU_6050PerformReading(void)
     MPU_6050_ax = MPU6050_dmp.aaReal.x;
     MPU_6050_ay = MPU6050_dmp.aaReal.y;
     MPU_6050_az = MPU6050_dmp.aaReal.z;
+    MPU_6050_motion = mpu6050.getIntMotionStatus();
 #else
   mpu6050.getMotion6(
     &MPU_6050_ax,
@@ -96,25 +98,10 @@ void MPU_6050PerformReading(void)
     &MPU_6050_gy,
     &MPU_6050_gz
   );
+    MPU_6050_motion = mpu6050.getIntMotionStatus();
 #endif //USE_MPU6050_DMP
   MPU_6050_temperature = mpu6050.getTemperature();
 }
-
-/* Work in progress - not yet fully functional
-void MPU_6050SetGyroOffsets(int x, int y, int z)
-{
-  mpu050.setXGyroOffset(x);
-  mpu6050.setYGyroOffset(y);
-  mpu6050.setZGyroOffset(z);
-}
-
-void MPU_6050SetAccelOffsets(int x, int y, int z)
-{
-  mpu6050.setXAccelOffset(x);
-  mpu6050.setYAccelOffset(y);
-  mpu6050.setZAccelOffset(z);
-}
-*/
 
 void MPU_6050Detect(void)
 {
@@ -126,11 +113,16 @@ void MPU_6050Detect(void)
 
 #ifdef USE_MPU6050_DMP
     MPU6050_dmp.devStatus = mpu6050.dmpInitialize();
-    mpu6050.setFullScaleGyroRange(MPU6050_GYRO_FS_250);
-    mpu6050.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
-    mpu6050.setSleepEnabled(false); // thanks to Jack Elston for pointing this one out!
     mpu6050.CalibrateAccel(10);
     mpu6050.CalibrateGyro(10);
+    
+    mpu6050.setDHPFMode(MPU6050_DHPF_0P63);
+    mpu6050.setMotionDetectionThreshold(1);
+    mpu6050.setMotionDetectionDuration(20);
+    mpu6050.setDLPFMode(MPU6050_DLPF_BW_20);
+    mpu6050.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
+    mpu6050.setFullScaleAccelRange(MPU6050_ACCEL_FS_4);
+    mpu6050.setSleepEnabled(false); // thanks to Jack Elston for pointing this one out!
     if (MPU6050_dmp.devStatus == 0) {
       mpu6050.setDMPEnabled(true);
       MPU6050_dmp.packetSize = mpu6050.dmpGetFIFOPacketSize();
@@ -138,11 +130,15 @@ void MPU_6050Detect(void)
     }
 #else
     mpu6050.initialize();
-    mpu6050.setFullScaleGyroRange(MPU6050_GYRO_FS_250);
-    mpu6050.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
-    mpu6050.setSleepEnabled(false); // thanks to Jack Elston for pointing this one out!
     mpu6050.CalibrateAccel(10);
     mpu6050.CalibrateGyro(10);
+    mpu6050.setDHPFMode(MPU6050_DHPF_0P63);
+    mpu6050.setMotionDetectionThreshold(1);
+    mpu6050.setMotionDetectionDuration(20);
+    mpu6050.setDLPFMode(MPU6050_DLPF_BW_20);
+    mpu6050.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
+    mpu6050.setFullScaleAccelRange(MPU6050_ACCEL_FS_4);
+    mpu6050.setSleepEnabled(false); // thanks to Jack Elston for pointing this one out!
     MPU_6050_found = mpu6050.testConnection();
 #endif //USE_MPU6050_DMP
     Settings->flag2.axis_resolution = 2;  // Need to be services by command Sensor32
@@ -182,12 +178,15 @@ const char HTTP_SNS_YPR[] PROGMEM =
 #define D_JSON_YAW "Yaw"
 #define D_JSON_PITCH "Pitch"
 #define D_JSON_ROLL "Roll"
+#define D_JSON_MOTD "MotionDetect"
 
 void MPU_6050Show(bool json)
 {
   MPU_6050PerformReading();
 
   float tempConv = ConvertTemp(MPU_6050_temperature / 340.0 + 35.53);
+  char axis_mo[33];
+  dtostrfd(MPU_6050_motion, Settings->flag2.axis_resolution, axis_mo);
   char axis_ax[33];
   dtostrfd(MPU_6050_ax, Settings->flag2.axis_resolution, axis_ax);
   char axis_ay[33];
@@ -210,6 +209,8 @@ void MPU_6050Show(bool json)
 #endif // USE_MPU6050_DMP
 
   if (json) {
+    char json_axis_mo[25];
+    snprintf_P(json_axis_mo, sizeof(json_axis_mo), PSTR(",\"" D_JSON_MOTD "\":%s"), axis_mo);
     char json_axis_ax[25];
     snprintf_P(json_axis_ax, sizeof(json_axis_ax), PSTR(",\"" D_JSON_AXIS_AX "\":%s"), axis_ax);
     char json_axis_ay[25];
@@ -230,11 +231,11 @@ void MPU_6050Show(bool json)
     char json_ypr_r[25];
     snprintf_P(json_ypr_r, sizeof(json_ypr_r), PSTR(",\"" D_JSON_ROLL "\":%s"), axis_roll);
     ResponseAppend_P(PSTR(",\"%s\":{\"" D_JSON_TEMPERATURE "\":%*_f%s%s%s%s%s%s%s%s%s}"),
-      D_SENSOR_MPU6050, Settings->flag2.temperature_resolution, &tempConv, json_axis_ax, json_axis_ay, json_axis_az, json_axis_gx, json_axis_gy, json_axis_gz,
+      D_SENSOR_MPU6050, Settings->flag2.temperature_resolution, &tempConv, json_axis_mo, json_axis_ax, json_axis_ay, json_axis_az, json_axis_gx, json_axis_gy, json_axis_gz,
       json_ypr_y, json_ypr_p, json_ypr_r);
 #else
     ResponseAppend_P(PSTR(",\"%s\":{\"" D_JSON_TEMPERATURE "\":%*_f%s%s%s%s%s%s}"),
-      D_SENSOR_MPU6050, Settings->flag2.temperature_resolution, &tempConv, json_axis_ax, json_axis_ay, json_axis_az, json_axis_gx, json_axis_gy, json_axis_gz);
+      D_SENSOR_MPU6050, Settings->flag2.temperature_resolution, &tempConv, json_axis_mo, json_axis_ax, json_axis_ay, json_axis_az, json_axis_gx, json_axis_gy, json_axis_gz);
 #endif // USE_MPU6050_DMP
 #ifdef USE_DOMOTICZ
     DomoticzFloatSensor(DZ_TEMP, tempConv);
