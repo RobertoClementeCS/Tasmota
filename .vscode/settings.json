@@ -75,5 +75,7 @@
 	"[cpp]": {
 		"editor.defaultFormatter": "ms-vscode.cpptools"
 	},
-	"C_Cpp.errorSquiggles": "enabled"
+	"C_Cpp.errorSquiggles": "enabled",
+	"C_Cpp.inlayHints.parameterNames.enabled": false,
+	"C_Cpp.autocompleteAddParentheses": true
 }
