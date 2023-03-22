@@ -27,16 +27,16 @@
  * I2C Address: 0x68 or 0x69 with AD0 HIGH
 \*********************************************************************************************/
 
-#define XSNS_32                          32
-#define XI2C_25                          25  // See I2CDEVICES.md
+#define XSNS_32 32
+#define XI2C_25 25 // See I2CDEVICES.md
 
-#define D_SENSOR_MPU6050                 "MPU6050"
+#define D_SENSOR_MPU6050 "MPU6050"
 
-#define MPU_6050_ADDR_AD0_LOW            0x68
-#define MPU_6050_ADDR_AD0_HIGH           0x69
+#define MPU_6050_ADDR_AD0_LOW 0x68
+#define MPU_6050_ADDR_AD0_HIGH 0x69
 
 uint8_t MPU_6050_address;
-uint8_t MPU_6050_addresses[] = { MPU_6050_ADDR_AD0_LOW, MPU_6050_ADDR_AD0_HIGH };
+uint8_t MPU_6050_addresses[] = {MPU_6050_ADDR_AD0_LOW, MPU_6050_ADDR_AD0_HIGH};
 uint8_t MPU_6050_found;
 
 int16_t MPU_6050_ax = 0, MPU_6050_ay = 0, MPU_6050_az = 0;
@@ -45,10 +45,11 @@ int16_t MPU_6050_temperature = 0;
 int16_t MPU_6050_motion = 0;
 
 #ifdef USE_MPU6050_DMP
-  #include "MPU6050_6Axis_MotionApps20.h"
-  #include "I2Cdev.h"
-  #include <helper_3dmath.h>
-  typedef struct MPU6050_DMP{
+#include "MPU6050_6Axis_MotionApps20.h"
+#include "I2Cdev.h"
+#include <helper_3dmath.h>
+typedef struct MPU6050_DMP
+{
   uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
   uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
   uint16_t fifoCount;     // count of all bytes currently in FIFO
@@ -59,47 +60,47 @@ int16_t MPU_6050_motion = 0;
   VectorFloat gravity;    // [x, y, z]            gravity vector
   float euler[3];         // [psi, theta, phi]    Euler angle container
   float yawPitchRoll[3];  // [yaw, pitch roll]    Yaw-pitch-roll container
-  } MPU6050_DMP;
+} MPU6050_DMP;
 
-  MPU6050_DMP MPU6050_dmp;
+MPU6050_DMP MPU6050_dmp;
 #else
-  #include <MPU6050.h>
-#endif //USE_MPU6050_DMP
+#include <MPU6050.h>
+#endif // USE_MPU6050_DMP
 MPU6050 mpu6050;
 
 void MPU_6050PerformReading(void)
 {
 #ifdef USE_MPU6050_DMP
-    mpu6050.resetFIFO(); // with a default sampling rate of 200Hz, we create a delay of approx. 5ms with a complete read cycle
+  mpu6050.resetFIFO(); // with a default sampling rate of 200Hz, we create a delay of approx. 5ms with a complete read cycle
+  MPU6050_dmp.fifoCount = mpu6050.getFIFOCount();
+  while (MPU6050_dmp.fifoCount < MPU6050_dmp.packetSize)
     MPU6050_dmp.fifoCount = mpu6050.getFIFOCount();
-    while (MPU6050_dmp.fifoCount < MPU6050_dmp.packetSize) MPU6050_dmp.fifoCount = mpu6050.getFIFOCount();
-    mpu6050.getFIFOBytes(MPU6050_dmp.fifoBuffer, MPU6050_dmp.packetSize);
-    MPU6050_dmp.fifoCount -= MPU6050_dmp.packetSize;
-    // calculate euler and acceleration with the DMP
-    mpu6050.dmpGetQuaternion(&MPU6050_dmp.q, MPU6050_dmp.fifoBuffer);
-    mpu6050.dmpGetEuler(MPU6050_dmp.euler, &MPU6050_dmp.q);
-    mpu6050.dmpGetAccel(&MPU6050_dmp.aa, MPU6050_dmp.fifoBuffer);
-    mpu6050.dmpGetGravity(&MPU6050_dmp.gravity, &MPU6050_dmp.q);
-    mpu6050.dmpGetLinearAccel(&MPU6050_dmp.aaReal, &MPU6050_dmp.aa, &MPU6050_dmp.gravity);
-    mpu6050.dmpGetYawPitchRoll(MPU6050_dmp.yawPitchRoll, &MPU6050_dmp.q, &MPU6050_dmp.gravity);
-    MPU_6050_gx = MPU6050_dmp.euler[0] * 180/M_PI;
-    MPU_6050_gy = MPU6050_dmp.euler[1] * 180/M_PI;
-    MPU_6050_gz = MPU6050_dmp.euler[2] * 180/M_PI;
-    MPU_6050_ax = MPU6050_dmp.aaReal.x;
-    MPU_6050_ay = MPU6050_dmp.aaReal.y;
-    MPU_6050_az = MPU6050_dmp.aaReal.z;
-    MPU_6050_motion = mpu6050.getIntMotionStatus();
+  mpu6050.getFIFOBytes(MPU6050_dmp.fifoBuffer, MPU6050_dmp.packetSize);
+  MPU6050_dmp.fifoCount -= MPU6050_dmp.packetSize;
+  // calculate euler and acceleration with the DMP
+  mpu6050.dmpGetQuaternion(&MPU6050_dmp.q, MPU6050_dmp.fifoBuffer);
+  mpu6050.dmpGetEuler(MPU6050_dmp.euler, &MPU6050_dmp.q);
+  mpu6050.dmpGetAccel(&MPU6050_dmp.aa, MPU6050_dmp.fifoBuffer);
+  mpu6050.dmpGetGravity(&MPU6050_dmp.gravity, &MPU6050_dmp.q);
+  mpu6050.dmpGetLinearAccel(&MPU6050_dmp.aaReal, &MPU6050_dmp.aa, &MPU6050_dmp.gravity);
+  mpu6050.dmpGetYawPitchRoll(MPU6050_dmp.yawPitchRoll, &MPU6050_dmp.q, &MPU6050_dmp.gravity);
+  MPU_6050_gx = MPU6050_dmp.euler[0] * 180 / M_PI;
+  MPU_6050_gy = MPU6050_dmp.euler[1] * 180 / M_PI;
+  MPU_6050_gz = MPU6050_dmp.euler[2] * 180 / M_PI;
+  MPU_6050_ax = MPU6050_dmp.aaReal.x;
+  MPU_6050_ay = MPU6050_dmp.aaReal.y;
+  MPU_6050_az = MPU6050_dmp.aaReal.z;
+  MPU_6050_motion = mpu6050.getIntMotionStatus();
 #else
   mpu6050.getMotion6(
-    &MPU_6050_ax,
-    &MPU_6050_ay,
-    &MPU_6050_az,
-    &MPU_6050_gx,
-    &MPU_6050_gy,
-    &MPU_6050_gz
-  );
-    MPU_6050_motion = mpu6050.getIntMotionStatus();
-#endif //USE_MPU6050_DMP
+      &MPU_6050_ax,
+      &MPU_6050_ay,
+      &MPU_6050_az,
+      &MPU_6050_gx,
+      &MPU_6050_gy,
+      &MPU_6050_gz);
+  MPU_6050_motion = mpu6050.getIntMotionStatus();
+#endif // USE_MPU6050_DMP
   MPU_6050_temperature = mpu6050.getTemperature();
 }
 
@@ -108,14 +109,17 @@ void MPU_6050Detect(void)
   for (uint32_t i = 0; i < sizeof(MPU_6050_addresses); i++)
   {
     MPU_6050_address = MPU_6050_addresses[i];
-    if (!I2cSetDevice(MPU_6050_address)) { break; }
+    mpu6050 if (!I2cSetDevice(MPU_6050_address))
+    {
+      break;
+    }
     mpu6050.setAddr(MPU_6050_addresses[i]);
 
 #ifdef USE_MPU6050_DMP
     MPU6050_dmp.devStatus = mpu6050.dmpInitialize();
     mpu6050.CalibrateAccel(10);
     mpu6050.CalibrateGyro(10);
-    
+
     mpu6050.setDHPFMode(MPU6050_DHPF_0P63);
     mpu6050.setMotionDetectionThreshold(1);
     mpu6050.setMotionDetectionDuration(20);
@@ -123,7 +127,8 @@ void MPU_6050Detect(void)
     mpu6050.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
     mpu6050.setFullScaleAccelRange(MPU6050_ACCEL_FS_4);
     mpu6050.setSleepEnabled(false); // thanks to Jack Elston for pointing this one out!
-    if (MPU6050_dmp.devStatus == 0) {
+    if (MPU6050_dmp.devStatus == 0)
+    {
       mpu6050.setDMPEnabled(true);
       MPU6050_dmp.packetSize = mpu6050.dmpGetFIFOPacketSize();
       MPU_6050_found = true;
@@ -140,11 +145,12 @@ void MPU_6050Detect(void)
     mpu6050.setFullScaleAccelRange(MPU6050_ACCEL_FS_4);
     mpu6050.setSleepEnabled(false); // thanks to Jack Elston for pointing this one out!
     MPU_6050_found = mpu6050.testConnection();
-#endif //USE_MPU6050_DMP
-    Settings->flag2.axis_resolution = 2;  // Need to be services by command Sensor32
+#endif                                   // USE_MPU6050_DMP
+    Settings->flag2.axis_resolution = 2; // Need to be services by command Sensor32
   }
 
-  if (MPU_6050_found) {
+  if (MPU_6050_found)
+  {
     I2cSetActiveFound(MPU_6050_address, D_SENSOR_MPU6050);
   }
 }
@@ -155,19 +161,19 @@ void MPU_6050Detect(void)
 
 #ifdef USE_WEBSERVER
 const char HTTP_SNS_AXIS[] PROGMEM =
-  "{s}" D_SENSOR_MPU6050 " " D_AX_AXIS "{m}%s{e}"                              // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-  "{s}" D_SENSOR_MPU6050 " " D_AY_AXIS "{m}%s{e}"                              // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-  "{s}" D_SENSOR_MPU6050 " " D_AZ_AXIS "{m}%s{e}"                              // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-  "{s}" D_SENSOR_MPU6050 " " D_GX_AXIS "{m}%s{e}"                              // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-  "{s}" D_SENSOR_MPU6050 " " D_GY_AXIS "{m}%s{e}"                              // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-  "{s}" D_SENSOR_MPU6050 " " D_GZ_AXIS "{m}%s{e}";                             // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}" D_SENSOR_MPU6050 " " D_AX_AXIS "{m}%s{e}"  // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}" D_SENSOR_MPU6050 " " D_AY_AXIS "{m}%s{e}"  // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}" D_SENSOR_MPU6050 " " D_AZ_AXIS "{m}%s{e}"  // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}" D_SENSOR_MPU6050 " " D_GX_AXIS "{m}%s{e}"  // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}" D_SENSOR_MPU6050 " " D_GY_AXIS "{m}%s{e}"  // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}" D_SENSOR_MPU6050 " " D_GZ_AXIS "{m}%s{e}"; // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
 #ifdef USE_MPU6050_DMP
 const char HTTP_SNS_YPR[] PROGMEM =
-  "{s}" D_SENSOR_MPU6050 " " D_YAW "{m}%s{e}"                                  // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-  "{s}" D_SENSOR_MPU6050 " " D_PITCH "{m}%s{e}"                                // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-  "{s}" D_SENSOR_MPU6050 " " D_ROLL "{m}%s{e}";                                // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-#endif // USE_MPU6050_DMP
-#endif // USE_WEBSERVER
+    "{s}" D_SENSOR_MPU6050 " " D_YAW "{m}%s{e}"   // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}" D_SENSOR_MPU6050 " " D_PITCH "{m}%s{e}" // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}" D_SENSOR_MPU6050 " " D_ROLL "{m}%s{e}"; // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+#endif                                            // USE_MPU6050_DMP
+#endif                                            // USE_WEBSERVER
 
 #define D_JSON_AXIS_AX "AccelXAxis"
 #define D_JSON_AXIS_AY "AccelYAxis"
@@ -208,7 +214,8 @@ void MPU_6050Show(bool json)
   dtostrfd(MPU6050_dmp.yawPitchRoll[2] / PI * 180.0, Settings->flag2.axis_resolution, axis_roll);
 #endif // USE_MPU6050_DMP
 
-  if (json) {
+  if (json)
+  {
     char json_axis_mo[25];
     snprintf_P(json_axis_mo, sizeof(json_axis_mo), PSTR(",\"" D_JSON_MOTD "\":%s"), axis_mo);
     char json_axis_ax[25];
@@ -231,17 +238,19 @@ void MPU_6050Show(bool json)
     char json_ypr_r[25];
     snprintf_P(json_ypr_r, sizeof(json_ypr_r), PSTR(",\"" D_JSON_ROLL "\":%s"), axis_roll);
     ResponseAppend_P(PSTR(",\"%s\":{\"" D_JSON_TEMPERATURE "\":%*_f%s%s%s%s%s%s%s%s%s}"),
-      D_SENSOR_MPU6050, Settings->flag2.temperature_resolution, &tempConv, json_axis_mo, json_axis_ax, json_axis_ay, json_axis_az, json_axis_gx, json_axis_gy, json_axis_gz,
-      json_ypr_y, json_ypr_p, json_ypr_r);
+                     D_SENSOR_MPU6050, Settings->flag2.temperature_resolution, &tempConv, json_axis_mo, json_axis_ax, json_axis_ay, json_axis_az, json_axis_gx, json_axis_gy, json_axis_gz,
+                     json_ypr_y, json_ypr_p, json_ypr_r);
 #else
     ResponseAppend_P(PSTR(",\"%s\":{\"" D_JSON_TEMPERATURE "\":%*_f%s%s%s%s%s%s}"),
-      D_SENSOR_MPU6050, Settings->flag2.temperature_resolution, &tempConv, json_axis_mo, json_axis_ax, json_axis_ay, json_axis_az, json_axis_gx, json_axis_gy, json_axis_gz);
+                     D_SENSOR_MPU6050, Settings->flag2.temperature_resolution, &tempConv, json_axis_mo, json_axis_ax, json_axis_ay, json_axis_az, json_axis_gx, json_axis_gy, json_axis_gz);
 #endif // USE_MPU6050_DMP
 #ifdef USE_DOMOTICZ
     DomoticzFloatSensor(DZ_TEMP, tempConv);
 #endif // USE_DOMOTICZ
 #ifdef USE_WEBSERVER
-  } else {
+  }
+  else
+  {
     WSContentSend_Temp(D_SENSOR_MPU6050, tempConv);
     WSContentSend_PD(HTTP_SNS_AXIS, axis_ax, axis_ay, axis_az, axis_gx, axis_gy, axis_gz);
 #ifdef USE_MPU6050_DMP
@@ -257,28 +266,35 @@ void MPU_6050Show(bool json)
 
 bool Xsns32(uint32_t function)
 {
-  if (!I2cEnabled(XI2C_25)) { return false; }
+  if (!I2cEnabled(XI2C_25))
+  {
+    return false;
+  }
 
   bool result = false;
 
-  if (FUNC_INIT == function) {
+  if (FUNC_INIT == function)
+  {
     MPU_6050Detect();
   }
-  else if (MPU_6050_found) {
-    switch (function) {
-      case FUNC_EVERY_SECOND:
-        if (TasmotaGlobal.tele_period == Settings->tele_period -3) {
-          MPU_6050PerformReading();
-        }
-        break;
-      case FUNC_JSON_APPEND:
-        MPU_6050Show(1);
-        break;
-#ifdef USE_WEBSERVER
-      case FUNC_WEB_SENSOR:
-        MPU_6050Show(0);
+  else if (MPU_6050_found)
+  {
+    switch (function)
+    {
+    case FUNC_EVERY_SECOND:
+      if (TasmotaGlobal.tele_period == Settings->tele_period - 3)
+      {
         MPU_6050PerformReading();
-        break;
+      }
+      break;
+    case FUNC_JSON_APPEND:
+      MPU_6050Show(1);
+      break;
+#ifdef USE_WEBSERVER
+    case FUNC_WEB_SENSOR:
+      MPU_6050Show(0);
+      MPU_6050PerformReading();
+      break;
 #endif // USE_WEBSERVER
     }
   }

@@ -162,97 +162,114 @@
 */
 
 // Define driver ID
-#define XSNS_33                          33
-#define XI2C_71                          71  // See I2CDEVICES.md
+#define XSNS_33 33
+#define XI2C_71 71 // See I2CDEVICES.md
 
 #ifndef QMC5883L_TEMP_SHIFT
-#define QMC5883L_TEMP_SHIFT             23   // sensor temperature are not calibrated (only relativ measurement) and need an absolute ground value in °C (see datasheet)
+#define QMC5883L_TEMP_SHIFT 23 // sensor temperature are not calibrated (only relativ measurement) and need an absolute ground value in °C (see datasheet)
 #endif
 
 /* The default I2C address of this chip */
-#define QMC5883L_ADDR                   0x0D
+#define QMC5883L_ADDR 0x0D
 
 /* Register numbers */
-#define QMC5883L_X_LSB                  0x00
-#define QMC5883L_X_MSB                  0x01
-#define QMC5883L_Y_LSB                  0x02
-#define QMC5883L_Y_MSB                  0x03
-#define QMC5883L_Z_LSB                  0x04
-#define QMC5883L_Z_MSB                  0x05
-#define QMC5883L_STATUS                 0x06
-#define QMC5883L_TEMP_LSB               0x07
-#define QMC5883L_TEMP_MSB               0x08
-#define QMC5883L_CONFIG                 0x09
-#define QMC5883L_CONFIG2                0x0a
-#define QMC5883L_RESET                  0x0b
-#define QMC5883L_RESERVED               0x0c
-#define QMC5883L_CHIP_ID                0x0d
+#define QMC5883L_X_LSB 0x00
+#define QMC5883L_X_MSB 0x01
+#define QMC5883L_Y_LSB 0x02
+#define QMC5883L_Y_MSB 0x03
+#define QMC5883L_Z_LSB 0x04
+#define QMC5883L_Z_MSB 0x05
+#define QMC5883L_STATUS 0x06
+#define QMC5883L_TEMP_LSB 0x07
+#define QMC5883L_TEMP_MSB 0x08
+#define QMC5883L_CONFIG 0x09
+#define QMC5883L_CONFIG2 0x0a
+#define QMC5883L_RESET 0x0b
+#define QMC5883L_RESERVED 0x0c
+#define QMC5883L_CHIP_ID 0x0d
 
 /* Bit values for the STATUS register */
-#define QMC5883L_STATUS_DRDY            1
-#define QMC5883L_STATUS_OVL             2
-#define QMC5883L_STATUS_DOR             4
+#define QMC5883L_STATUS_DRDY 1
+#define QMC5883L_STATUS_OVL 2
+#define QMC5883L_STATUS_DOR 4
 
 /* Oversampling values for the CONFIG register */
-#define QMC5883L_CONFIG_OS512           0b00000000
-#define QMC5883L_CONFIG_OS256           0b01000000
-#define QMC5883L_CONFIG_OS128           0b10000000
-#define QMC5883L_CONFIG_OS64            0b11000000
+#define QMC5883L_CONFIG_OS512 0b00000000
+#define QMC5883L_CONFIG_OS256 0b01000000
+#define QMC5883L_CONFIG_OS128 0b10000000
+#define QMC5883L_CONFIG_OS64 0b11000000
 
 /* Range values for the CONFIG register */
-#define QMC5883L_CONFIG_2GAUSS          0b00000000
-#define QMC5883L_CONFIG_8GAUSS          0b00010000
+#define QMC5883L_CONFIG_2GAUSS 0b00000000
+#define QMC5883L_CONFIG_8GAUSS 0b00010000
 
 /* Rate values for the CONFIG register */
-#define QMC5883L_CONFIG_10HZ            0b00000000
-#define QMC5883L_CONFIG_50HZ            0b00000100
-#define QMC5883L_CONFIG_100HZ           0b00001000
-#define QMC5883L_CONFIG_200HZ           0b00001100
+#define QMC5883L_CONFIG_10HZ 0b00000000
+#define QMC5883L_CONFIG_50HZ 0b00000100
+#define QMC5883L_CONFIG_100HZ 0b00001000
+#define QMC5883L_CONFIG_200HZ 0b00001100
 
 /* Mode values for the CONFIG register */
-#define QMC5883L_CONFIG_STANDBY         0b00000000
-#define QMC5883L_CONFIG_CONT            0b00000001
+#define QMC5883L_CONFIG_STANDBY 0b00000000
+#define QMC5883L_CONFIG_CONT 0b00000001
 
 /* Mode values for the CONFIG2 register */
-#define QMC5883L_CONFIG2_RESET          0b10000000
+#define QMC5883L_CONFIG2_RESET 0b10000000
 
-    // data field
-struct QMC5883L_s {
-  int16_t   MX, MY, MZ;
-  float     temp;
-  uint16_t  scalar;
+// data field
+struct QMC5883L_s
+{
+  int16_t MX, MY, MZ;
+  float temp;
+  uint16_t scalar;
 } *QMC5883L = nullptr;
 
-
 // Initialise the device
-void QMC5883L_Init() {
-  if (!I2cSetDevice(QMC5883L_ADDR)) { return; }
+void QMC5883L_Init()
+{
+  if (!I2cSetDevice(QMC5883L_ADDR))
+  {
+    return;
+  }
   // reset QMC5883L
-  if (I2cWrite8(QMC5883L_ADDR, QMC5883L_CONFIG2, QMC5883L_CONFIG2_RESET) == false) { return; }
+  if (I2cWrite8(QMC5883L_ADDR, QMC5883L_CONFIG2, QMC5883L_CONFIG2_RESET) == false)
+  {
+    return;
+  }
   // Software Reset
-  if (I2cWrite8(QMC5883L_ADDR, QMC5883L_RESET, 0x01) == false) { return; }
+  if (I2cWrite8(QMC5883L_ADDR, QMC5883L_RESET, 0x01) == false)
+  {
+    return;
+  }
   // write config
-  if (I2cWrite8(QMC5883L_ADDR, QMC5883L_CONFIG, QMC5883L_CONFIG_OS256 | QMC5883L_CONFIG_8GAUSS | QMC5883L_CONFIG_100HZ | QMC5883L_CONFIG_CONT) == false) { return; }
+  if (I2cWrite8(QMC5883L_ADDR, QMC5883L_CONFIG, QMC5883L_CONFIG_OS256 | QMC5883L_CONFIG_8GAUSS | QMC5883L_CONFIG_100HZ | QMC5883L_CONFIG_CONT) == false)
+  {
+    return;
+  }
 
   I2cSetActiveFound(QMC5883L_ADDR, "QMC5883L");
   QMC5883L = (QMC5883L_s *)calloc(1, sizeof(struct QMC5883L_s));
 }
 
-//Read the magnetic data
-void QMC5883L_read_data(void) {
+// Read the magnetic data
+void QMC5883L_read_data(void)
+{
   // check if chip is ready to provice data
-  if (!(I2cRead8(QMC5883L_ADDR, QMC5883L_STATUS) & QMC5883L_STATUS_DRDY)) { return; }  // Chip not yet ready, next round try again
+  if (!(I2cRead8(QMC5883L_ADDR, QMC5883L_STATUS) & QMC5883L_STATUS_DRDY))
+  {
+    return;
+  } // Chip not yet ready, next round try again
 
-  QMC5883L->MX = I2cReadS16_LE(QMC5883L_ADDR, QMC5883L_X_LSB);  // Select LSB register
+  QMC5883L->MX = I2cReadS16_LE(QMC5883L_ADDR, QMC5883L_X_LSB); // Select LSB register
   QMC5883L->MY = I2cReadS16_LE(QMC5883L_ADDR, QMC5883L_Y_LSB);
   QMC5883L->MZ = I2cReadS16_LE(QMC5883L_ADDR, QMC5883L_Z_LSB);
 
   // calculate scalar magnetic induction
-//  QMC5883L->scalar = sqrt((QMC5883L->MX * QMC5883L->MX) + (QMC5883L->MY * QMC5883L->MY) + (QMC5883L->MZ * QMC5883L->MZ));  // 650 bytes larger
+  //  QMC5883L->scalar = sqrt((QMC5883L->MX * QMC5883L->MX) + (QMC5883L->MY * QMC5883L->MY) + (QMC5883L->MZ * QMC5883L->MZ));  // 650 bytes larger
   QMC5883L->scalar = SqrtInt((QMC5883L->MX * QMC5883L->MX) + (QMC5883L->MY * QMC5883L->MY) + (QMC5883L->MZ * QMC5883L->MZ));
 
   // get temperature
-  QMC5883L->temp = ConvertTemp((I2cReadS16_LE(QMC5883L_ADDR, QMC5883L_TEMP_LSB) / 100) + QMC5883L_TEMP_SHIFT);  // Temp in celsius
+  QMC5883L->temp = ConvertTemp((I2cReadS16_LE(QMC5883L_ADDR, QMC5883L_TEMP_LSB) / 100) + QMC5883L_TEMP_SHIFT); // Temp in celsius
 }
 
 /*********************************************************************************************\
@@ -261,18 +278,22 @@ void QMC5883L_read_data(void) {
 
 #ifdef USE_WEBSERVER
 const char HTTP_SNS_QMC5883L[] PROGMEM =
-    "{s}QMC5883L " D_MX "{m}%d " D_UNIT_MICROTESLA "{e}"             // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-    "{s}QMC5883L " D_MY "{m}%d " D_UNIT_MICROTESLA "{e}"             // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-    "{s}QMC5883L " D_MZ "{m}%d " D_UNIT_MICROTESLA "{e}"             // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
-    "{s}QMC5883L " D_MAGNETICFLD "{m}%d " D_UNIT_MICROTESLA "{e}";   // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}QMC5883L " D_MX "{m}%d " D_UNIT_MICROTESLA "{e}"           // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}QMC5883L " D_MY "{m}%d " D_UNIT_MICROTESLA "{e}"           // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}QMC5883L " D_MZ "{m}%d " D_UNIT_MICROTESLA "{e}"           // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
+    "{s}QMC5883L " D_MAGNETICFLD "{m}%d " D_UNIT_MICROTESLA "{e}"; // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
 #endif
 
-void QMC5883L_Show(uint8_t json) {
-  if (json) {
+void QMC5883L_Show(uint8_t json)
+{
+  if (json)
+  {
     ResponseAppend_P(PSTR(",\"QMC5883L\":{\"" D_JSON_MX "\":%d,\"" D_JSON_MY "\":%d,\"" D_JSON_MZ "\":%d,\"" D_JSON_MAGNETICFLD "\":%u,\"" D_JSON_TEMPERATURE "\":%*_f}"),
-      QMC5883L->MX, QMC5883L->MY, QMC5883L->MZ, QMC5883L->scalar, Settings->flag2.temperature_resolution, &QMC5883L->temp);
+                     QMC5883L->MX, QMC5883L->MY, QMC5883L->MZ, QMC5883L->scalar, Settings->flag2.temperature_resolution, &QMC5883L->temp);
 #ifdef USE_WEBSERVER
-  } else {
+  }
+  else
+  {
     WSContentSend_PD(HTTP_SNS_QMC5883L, QMC5883L->MX, QMC5883L->MY, QMC5883L->MZ, QMC5883L->scalar);
     WSContentSend_Temp("QMC5883L", QMC5883L->temp);
 #endif
@@ -283,14 +304,21 @@ void QMC5883L_Show(uint8_t json) {
  * Interface
 \*********************************************************************************************/
 
-bool Xsns33(uint32_t function) {
-  if (!I2cEnabled(XI2C_71)) { return false; }
+bool Xsns33(uint32_t function)
+{
+  if (!I2cEnabled(XI2C_71))
+  {
+    return false;
+  }
 
-  if (FUNC_INIT == function) {
+  if (FUNC_INIT == function)
+  {
     QMC5883L_Init();
   }
-  else if (QMC5883L != nullptr) {
-    switch (function) {
+  else if (QMC5883L != nullptr)
+  {
+    switch (function)
+    {
     case FUNC_JSON_APPEND:
       QMC5883L_Show(1);
       break;
@@ -301,10 +329,10 @@ bool Xsns33(uint32_t function) {
     case FUNC_WEB_SENSOR:
       QMC5883L_Show(0);
       break;
-#endif  // USE_WEBSERVER
+#endif // USE_WEBSERVER
     }
   }
   return true;
 }
-#endif  // USE_QMC5883L
-#endif  // USE_I2C
+#endif // USE_QMC5883L
+#endif // USE_I2C
