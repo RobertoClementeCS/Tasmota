@@ -109,7 +109,7 @@ void MPU_6050Detect(void)
   for (uint32_t i = 0; i < sizeof(MPU_6050_addresses); i++)
   {
     MPU_6050_address = MPU_6050_addresses[i];
-    mpu6050 if (!I2cSetDevice(MPU_6050_address))
+    if (!I2cSetDevice(MPU_6050_address))
     {
       break;
     }
