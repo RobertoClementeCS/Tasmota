@@ -46,11 +46,10 @@ keywords if then else endif, or, and are better readable for beginners (others m
 #ifndef TS_FLOAT
 #define TS_FLOAT float
 #endif
-
-
 // float = 4, double = 8 bytes
 
-const uint8_t SCRIPT_VERS[2] = {5, 1};
+
+const uint8_t SCRIPT_VERS[2] = {5, 2};
 
 #define SCRIPT_DEBUG 0
 
@@ -126,8 +125,8 @@ char *Get_esc_char(char *cp, char *esc_chr);
 #pragma message "script 24c256 file option used"
 #else
 
-#if EEP_SCRIPT_SIZE==SPECIAL_EEPMODE_SIZE || EEP_SCRIPT_SIZE==SPI_FLASH_2SEC_SIZE
-#if EEP_SCRIPT_SIZE==SPI_FLASH_2SEC_SIZE
+#if EEP_SCRIPT_SIZE==SPECIAL_EEPMODE_SIZE || EEP_SCRIPT_SIZE==SPI_FLASH_2SEC_SIZE || EEP_SCRIPT_SIZE==SPI_FLASH_SEC_SIZE
+#if EEP_SCRIPT_SIZE==SPI_FLASH_2SEC_SIZE || EEP_SCRIPT_SIZE==SPI_FLASH_SEC_SIZE
 #pragma message "internal special flash script buffer used"
 #else
 #pragma message "internal compressed eeprom script buffer used"
@@ -189,6 +188,8 @@ void Script_ticker4_end(void) {
   Run_Scripter1(">ti4", 4, 0);
 }
 #endif
+
+
 
 // EEPROM MACROS
 // i2c eeprom
@@ -439,6 +440,22 @@ struct SCRIPT_SPI {
 #define FLT_MAX 99999999
 #endif
 
+#ifdef USE_SCRIPT_ONEWIRE
+#include <OneWire.h>
+#include <DS2480B.h>
+
+#ifndef MAX_DS_SENSORS
+#define MAX_DS_SENSORS 20
+#endif
+
+typedef struct {
+  OneWire *ds;
+  DS2480B *dsh;
+  TasmotaSerial *ts;
+  uint8_t ds_address[MAX_DS_SENSORS][8];
+} ScriptOneWire;
+#endif // USE_SCRIPT_ONEWIRE
+
 #define SFS_MAX 4
 // global memory
 struct SCRIPT_MEM {
@@ -499,6 +516,7 @@ struct SCRIPT_MEM {
     char *web_pages[10];
     uint32_t script_lastmillis;
     bool event_handeled = false;
+    bool res_ivar = false;
 #ifdef USE_BUTTON_EVENT
     int8_t script_button[MAX_KEYS];
 #endif //USE_BUTTON_EVENT
@@ -523,6 +541,15 @@ struct SCRIPT_MEM {
     char *hstr;
 #endif
 
+#ifdef USE_SCRIPT_I2C
+    uint8_t script_i2c_addr;
+    TwoWire *script_i2c_wire;
+#endif
+
+#ifdef USE_SCRIPT_ONEWIRE
+    ScriptOneWire ow;
+#endif
+
 } glob_script_mem;
 
 
@@ -533,10 +560,10 @@ void flt2char(TS_FLOAT num, char *nbuff) {
   dtostrfd(num, glob_script_mem.script_dprec, nbuff);
 }
 
-void f2char(TS_FLOAT num, uint32_t dprec, uint32_t lzeros, char *nbuff, char dsep);
+void f2char(double num, uint32_t dprec, uint32_t lzeros, char *nbuff, char dsep);
 
 // convert float to char with leading zeros
-void f2char(TS_FLOAT num, uint32_t dprec, uint32_t lzeros, char *nbuff, char dsep) {
+void f2char(double num, uint32_t dprec, uint32_t lzeros, char *nbuff, char dsep) {
   dtostrfd(num, dprec, nbuff);
   if (lzeros > 1) {
     // check leading zeros
@@ -583,6 +610,9 @@ int32_t opt_fext(File *fp,  char *ts_from, char *ts_to, uint32_t flg);
 int32_t extract_from_file(File *fp,  char *ts_from, char *ts_to, int8_t coffs, TS_FLOAT **a_ptr, uint16_t *a_len, uint8_t numa, int16_t accum);
 #endif
 char *eval_sub(char *lp, TS_FLOAT *fvar, char *rstr);
+uint32_t script_ow(uint8_t sel, uint32_t val);
+int32_t script_logfile_write(char *path, char *payload, uint32_t size);
+void script_sort_array(TS_FLOAT *array, uint16_t size);
 
 void ScriptEverySecond(void) {
 
@@ -691,8 +721,8 @@ char *script;
       maxsvars = 1;
     }
     uint16_t maxvars = maxsvars + maxnvars;
-    //AddLog(LOG_LEVEL_INFO, PSTR("Script: svar = %d, nvars = %d"), maxsvars, maxnvars);
-    
+    //AddLog(LOG_LEVEL_INFO, PSTR("SCR: svar = %d, nvars = %d"), maxsvars, maxnvars);
+
     // scan lines for >DEF
     uint16_t lines = 0;
     uint16_t nvars = 0;
@@ -837,15 +867,21 @@ char *script;
                 } else {
                     vtypes[vars].bits.is_filter = 0;
                 }
-                
+
                 *vnp_p++ = vnames_p;
                 while (lp < op) {
+                  if (*lp == ' ') {
+                    // no spaces
+                    lp++;
+                  } else {
                     *vnames_p++ = *lp++;
+                  }
                 }
                 *vnames_p++ = 0;
                 // init variable
                 op++;
                 while (*op == ' ') {
+                  // skip spaces
                   op++;
                 }
                 if (*op != '"') {
@@ -1054,7 +1090,7 @@ char *script;
     }
 
     // variables usage info
-    AddLog(LOG_LEVEL_INFO, PSTR("Script: nv=%d, tv=%d, vns=%d, vmem=%d, smem=%d"), nvars, svars, index, glob_script_mem.script_mem_size, glob_script_mem.script_size);
+    AddLog(LOG_LEVEL_INFO, PSTR("SCR: nv=%d, tv=%d, vns=%d, vmem=%d, smem=%d"), nvars, svars, index, glob_script_mem.script_mem_size, glob_script_mem.script_size);
 
     // copy string variables
     char *cp1 = glob_script_mem.glob_snp;
@@ -1203,12 +1239,12 @@ void Script_Init_UDP() {
 
 
 #ifdef SCRIPT_DEBUG_UDP
-    AddLog(LOG_LEVEL_DEBUG, PSTR(D_LOG_UPNP "SCRIPT UDP started"));
+    AddLog(LOG_LEVEL_DEBUG, PSTR(D_LOG_UPNP "SCR: UDP started"));
 #endif
     glob_script_mem.udp_flags.udp_connected = 1;
   } else {
 #ifdef SCRIPT_DEBUG_UDP
-    AddLog(LOG_LEVEL_DEBUG, PSTR(D_LOG_UPNP "SCRIPT UDP failed"));
+    AddLog(LOG_LEVEL_DEBUG, PSTR(D_LOG_UPNP "SCR: UDP failed"));
 #endif
     glob_script_mem.udp_flags.udp_connected  = 0;
   }
@@ -1251,12 +1287,12 @@ void Script_PollUdp(void) {
           uint32_t res = match_vars(vnam, &fp, &sp, &index);
           if (res == NUM_RES) {
 #ifdef SCRIPT_DEBUG_UDP
-            AddLog(LOG_LEVEL_DEBUG, PSTR("num var found - %s - %d - %d"), vnam, res, index);
+            AddLog(LOG_LEVEL_DEBUG, PSTR("SCR: num var found - %s - %d - %d"), vnam, res, index);
 #endif
             *fp=CharToFloat(cp + 1);
           } else if (res == STR_RES) {
 #ifdef SCRIPT_DEBUG_UDP
-            AddLog(LOG_LEVEL_DEBUG, PSTR("string var found - %s - %d - %d"), vnam, res, index);
+            AddLog(LOG_LEVEL_DEBUG, PSTR("SCR: string var found - %s - %d - %d"), vnam, res, index);
 #endif
             strlcpy(sp, cp + 1, SCRIPT_MAXSSIZE);
           } else {
@@ -1294,12 +1330,12 @@ void script_udp_sendvar(char *vname, TS_FLOAT *fp, char *sp) {
     dtostrfd(*fp, 8, flstr);
     strcat(sbuf, flstr);
 #ifdef SCRIPT_DEBUG_UDP
-    AddLog(LOG_LEVEL_DEBUG, PSTR("num var updated - %s"), sbuf);
+    AddLog(LOG_LEVEL_DEBUG, PSTR("SCR: num var updated - %s"), sbuf);
 #endif
   } else {
     strcat(sbuf, sp);
 #ifdef SCRIPT_DEBUG_UDP
-    AddLog(LOG_LEVEL_DEBUG, PSTR("string var updated - %s"), sbuf);
+    AddLog(LOG_LEVEL_DEBUG, PSTR("SCR: string var updated - %s"), sbuf);
 #endif
   }
   glob_script_mem.Script_PortUdp.beginPacket(IPAddress(239, 255, 255, 250), SCRIPT_UDP_PORT);
@@ -2141,7 +2177,7 @@ int32_t fetch_jpg(uint32_t sel, char *url, uint32_t xp, uint32_t yp, uint32_t sc
           strcpy(jpg_task.boundary,cp + 1);
         }
       } else {
-        AddLog(LOG_LEVEL_INFO,PSTR("HTTP error %d = %s"), httpCode, jpg_task.http.errorToString(httpCode).c_str());
+        AddLog(LOG_LEVEL_INFO,PSTR("SCR: HTTP error %d = %s"), httpCode, jpg_task.http.errorToString(httpCode).c_str());
       }
       return httpCode;
       break;
@@ -2296,6 +2332,33 @@ uint32_t match_vars(char *dvnam, TS_FLOAT **fp, char **sp, uint32_t *ind) {
 #define SCRIPT_IS_STRING_MAXSIZE 256
 #endif
 
+
+void script_sort_string_array(uint8_t num) {
+  uint16_t sasize = glob_script_mem.si_num[num];
+  char *sa = glob_script_mem.last_index_string[num];
+  if (!sa) {
+    return;
+  }
+  char temp[SCRIPT_MAXSSIZE];
+  bool swapped;
+  do {
+    swapped = false;
+    for (uint16_t i = 0; i < sasize - 1; ++i) {
+      char *s1 = sa + (i * glob_script_mem.max_ssize);
+      char *s2 = sa + ((i + 1) * glob_script_mem.max_ssize);
+      if (strcmp(s1, s2) > 0) {
+        // swap
+        strcpy(temp, s1);
+        strcpy(s1, s2);
+        strcpy(s2, temp);
+        swapped = true;
+      }
+    }
+    sasize -= 1;
+  } while (swapped);
+}
+
+
 char *isargs(char *lp, uint32_t isind) {
   TS_FLOAT fvar;
   lp = GetNumericArgument(lp, OPER_EQU, &fvar, 0);
@@ -2331,11 +2394,11 @@ char *isargs(char *lp, uint32_t isind) {
       glob_script_mem.si_num[isind] = MAX_SARRAY_NUM;
     }
 
-    glob_script_mem.last_index_string[isind] = (char*)calloc(glob_script_mem.max_ssize*glob_script_mem.si_num[isind], 1);
-    for (uint32_t cnt = 0; cnt<glob_script_mem.siro_num[isind]; cnt++) {
+    glob_script_mem.last_index_string[isind] = (char*)calloc(glob_script_mem.max_ssize * glob_script_mem.si_num[isind], 1);
+    for (uint32_t cnt = 0; cnt < glob_script_mem.siro_num[isind]; cnt++) {
       char str[SCRIPT_MAXSSIZE];
       GetTextIndexed(str, sizeof(str), cnt, sstart);
-      strlcpy(glob_script_mem.last_index_string[isind] + (cnt*glob_script_mem.max_ssize), str,glob_script_mem.max_ssize);
+      strlcpy(glob_script_mem.last_index_string[isind] + (cnt * glob_script_mem.max_ssize), str, glob_script_mem.max_ssize);
     }
   } else {
     glob_script_mem.last_index_string[isind] = sstart;
@@ -2390,8 +2453,8 @@ TS_FLOAT fvar;
         GetTextIndexed(str, sizeof(str), index , glob_script_mem.last_index_string[isind]);
       }
     } else {
-      if (index > glob_script_mem.si_num[isind]) {
-        index = glob_script_mem.si_num[isind];
+      if (index >= glob_script_mem.si_num[isind]) {
+        index = glob_script_mem.si_num[isind] - 1;
       }
       strlcpy(str,glob_script_mem.last_index_string[isind] + (index * glob_script_mem.max_ssize), glob_script_mem.max_ssize);
     }
@@ -2449,6 +2512,7 @@ char *isvar(char *lp, uint8_t *vtype, struct T_INDEX *tind, TS_FLOAT *fp, char *
       // isnumber
         if (fp) {
           if (*lp == '0' && *(lp + 1) == 'x') {
+
             lp += 2;
             *fp = strtoll(lp, &lp, 16);
           } else {
@@ -2465,6 +2529,8 @@ char *isvar(char *lp, uint8_t *vtype, struct T_INDEX *tind, TS_FLOAT *fp, char *
         *vtype = NUM_RES;
         return lp;
     }
+
+
 
     if (*lp == '"') {
       lp++;
@@ -2521,6 +2587,7 @@ char *isvar(char *lp, uint8_t *vtype, struct T_INDEX *tind, TS_FLOAT *fp, char *
       olen = strlen(dvnam);
     }
 
+
     glob_script_mem.arres = 0;
     for (count = 0; count < glob_script_mem.numvars; count++) {
         char *cp = glob_script_mem.glob_vnp + glob_script_mem.vnp_offset[count];
@@ -2557,6 +2624,7 @@ char *isvar(char *lp, uint8_t *vtype, struct T_INDEX *tind, TS_FLOAT *fp, char *
             }
         }
     }
+
 
 #define USE_SCRIPT_JSON
 //#define USE_SCRIPT_FULL_JSON_PARSER
@@ -2782,6 +2850,19 @@ chknext:
           }
           memcpy(fpd, fps, alend * sizeof(TS_FLOAT));
           fvar = alend;
+          goto nfuncexit;
+        }
+
+        if (!strncmp_XP(lp, XPSTR("as("), 3)) {
+          uint16_t alen;
+          TS_FLOAT *fa;
+          lp = get_array_by_name(lp + 3, &fa, &alen, 0);
+          if (!fa) {
+            fvar = -1;
+            goto exit;
+          }
+          script_sort_array(fa, alen);
+          fvar = 0;
           goto nfuncexit;
         }
 
@@ -3022,6 +3103,10 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
           goto nfuncexit;
         }
 #endif
+        if (!strncmp_XP(vname, XPSTR("ctper"), 5)) {
+          fvar = TasmotaGlobal.tele_period;
+          goto exit;
+        }
         break;
       case 'd':
         if (!strncmp_XP(vname, XPSTR("day"), 3)) {
@@ -3158,7 +3243,7 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
             if (!glob_script_mem.file_flags[cnt].is_open) {
               if (mode == 0) {
 #ifdef DEBUG_FS
-                AddLog(LOG_LEVEL_INFO, PSTR("open file for read %d"), cnt);
+                AddLog(LOG_LEVEL_INFO, PSTR("SCR: open file for read %d"), cnt);
 #endif
                 glob_script_mem.files[cnt] = ufsp->open(str, FS_FILE_READ);
                 if (glob_script_mem.files[cnt].isDirectory()) {
@@ -3172,12 +3257,12 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
                 if (mode == 1) {
                   glob_script_mem.files[cnt] = ufsp->open(str,FS_FILE_WRITE);
 #ifdef DEBUG_FS
-                  AddLog(LOG_LEVEL_INFO, PSTR("open file for write %d"), cnt);
+                  AddLog(LOG_LEVEL_INFO, PSTR("SCR: open file for write %d"), cnt);
 #endif
                 } else {
                   glob_script_mem.files[cnt] = ufsp->open(str,FS_FILE_APPEND);
 #ifdef DEBUG_FS
-                  AddLog(LOG_LEVEL_INFO, PSTR("open file for append %d"), cnt);
+                  AddLog(LOG_LEVEL_INFO, PSTR("SCR: open file for append %d"), cnt);
 #endif
                 }
               }
@@ -3185,7 +3270,7 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
                 fvar = cnt;
                 glob_script_mem.file_flags[cnt].is_open = 1;
               } else {
-                AddLog(LOG_LEVEL_INFO, PSTR("file open failed"));
+                AddLog(LOG_LEVEL_INFO, PSTR("SCR: file open failed"));
               }
               break;
             }
@@ -3198,7 +3283,7 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
             uint8_t ind = fvar;
             if (ind >= SFS_MAX) ind = SFS_MAX - 1;
 #ifdef DEBUG_FS
-            AddLog(LOG_LEVEL_INFO, PSTR("closing file %d"), ind);
+            AddLog(LOG_LEVEL_INFO, PSTR("SCR: closing file %d"), ind);
 #endif
             glob_script_mem.files[ind].close();
             glob_script_mem.file_flags[ind].is_open = 0;
@@ -3268,6 +3353,13 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
           lp = GetNumericArgument(lp, OPER_EQU, &fvar, gv);
           uint8_t find = fvar;
           if (find >= SFS_MAX) find = SFS_MAX - 1;
+          while (*lp == ' ') lp++;
+          uint8_t options = 0;
+          if (*lp != ')') {
+              // options
+             lp = GetNumericArgument(lp, OPER_EQU, &fvar, gv);
+             options = fvar;
+          }
           uint8_t index = 0;
           char str[SCRIPT_MAXSSIZE];
           char *cp = str;
@@ -3298,9 +3390,12 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
               while (glob_script_mem.files[find].available()) {
                 uint8_t buf[1];
                 glob_script_mem.files[find].read(buf,1);
-                if (buf[0] == '\t' || buf[0] == ',' || buf[0] == '\n' || buf[0] == '\r') {
+                if (!options && (buf[0] == '\t' || buf[0] == ',' || buf[0] == '\n' || buf[0] == '\r')) {
                   break;
                 } else {
+                  if (options && (buf[0] == '\n' || buf[0] == '\r')) {
+                    break;
+                  }
                   *cp++ = buf[0];
                   index++;
                   if (index >= glob_script_mem.max_ssize - 1) break;
@@ -3679,6 +3774,13 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
           goto nfuncexit;
         }
 #endif
+
+        if (!strncmp_XP(lp, XPSTR("f("), 2)) {
+          // convert to float var
+          lp = GetNumericArgument(lp + 2, OPER_EQU, &fvar, gv);
+          fvar = *(uint32_t*)&fvar;
+          goto nfuncexit;
+        }
         break;
 
       case 'g':
@@ -3705,6 +3807,13 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
           SCRIPT_SKIP_SPACES
           lp = GetNumericArgument(lp, OPER_EQU, &fvar, gv);
           SCRIPT_SKIP_SPACES
+          char delimc = 0;
+          if (*lp != ')') {
+            // get delimiter
+            delimc = *lp;
+            lp++;
+          }
+
           char rstring[SCRIPT_MAXSSIZE];
           rstring[0] = 0;
           int8_t index = fvar;
@@ -3732,7 +3841,7 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
                 }
               } else {
                 // preserve mqtt_data
-                char *mqd = (char*)malloc(ResponseSize()+2);
+                char *mqd = (char*)malloc(ResponseSize() + 2);
                 if (mqd) {
                   strlcpy(mqd, ResponseData(), ResponseSize());
                   wd = mqd;
@@ -3753,6 +3862,12 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
                       // fail or last string
                       strlcpy(rstring, lwd, glob_script_mem.max_ssize);
                       break;
+                    }
+                  }
+                  if (delimc) {
+                    char *xp = strchr(rstring, delimc);
+                     if (xp) {
+                      *xp = 0;              
                     }
                   }
                   free(mqd);
@@ -4025,7 +4140,11 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
           // arg2
           TS_FLOAT fvar2;
           lp = GetNumericArgument(lp, OPER_EQU, &fvar2, gv);
-          fvar = script_i2c(9 + bytes, fvar, fvar2);
+          if (glob_script_mem.res_ivar) {
+            fvar = script_i2c(9 + bytes, fvar, *(uint32_t*)&fvar2);
+          } else {
+            fvar = script_i2c(9 + bytes, fvar, fvar2);
+          }
           goto nfuncexit;
         }
         if (!strncmp_XP(lp, XPSTR("ir"), 2)) {
@@ -4038,7 +4157,12 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
             lp++;
           }
           lp = GetNumericArgument(lp + 1, OPER_EQU, &fvar, gv);
-          fvar = script_i2c(2, fvar, bytes);
+          if (glob_script_mem.res_ivar) {
+            uint32_t intres = script_i2c(2, fvar, bytes);
+            (*(uint32_t*)&fvar) = intres;
+          } else {
+            fvar = script_i2c(2, fvar, bytes);
+          }
           goto nfuncexit;
         }
 #endif // USE_SCRIPT_I2C
@@ -4070,6 +4194,12 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
         }
 #endif // USE_I2S_AUDIO
 #endif // ESP32
+        if (!strncmp_XP(lp, XPSTR("i("), 2)) {
+          // convert to integer var
+          lp = GetNumericArgument(lp + 2, OPER_EQU, &fvar, gv);
+          *(uint32_t*)&fvar = fvar;
+          goto nfuncexit;
+        }
         break;
 
 #ifdef ESP32
@@ -4144,6 +4274,30 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
           goto nfuncexit;
         }
 #endif // USE_LVGL
+
+#ifdef USE_UFILESYS
+#ifdef USE_SCRIPT_FATFS_EXT
+        if (!strncmp_XP(lp, XPSTR("lfw("), 4)) {
+          char path[SCRIPT_MAXSSIZE];
+          lp = GetStringArgument(lp + 4, OPER_EQU, path, 0);
+          char payload[SCRIPT_MAXSSIZE];
+          lp = GetStringArgument(lp, OPER_EQU, payload, 0);
+          lp = GetNumericArgument(lp, OPER_EQU, &fvar, 0);
+          // write to logfile
+          fvar = script_logfile_write(path, payload, fvar);
+          goto nfuncexit;
+        }
+#endif // USE_SCRIPT_FATFS_EXT
+#endif
+
+#ifdef USE_ANGLE_FUNC
+        if (!strncmp_XP(lp, XPSTR("log("), 4)) {
+          lp = GetNumericArgument(lp + 4, OPER_EQU, &fvar, gv);
+          SCRIPT_SKIP_SPACES
+          fvar = log(fvar);
+          goto nfuncexit;
+        }
+#endif
         break;
       case 'm':
         if (!strncmp_XP(lp, XPSTR("med("), 4)) {
@@ -4292,6 +4446,21 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
           goto exit;
         }
         break;
+
+#ifdef USE_SCRIPT_ONEWIRE
+      case 'o':
+        if (!strncmp_XP(vname, XPSTR("ow("), 3)) {
+          lp = GetNumericArgument(lp + 3, OPER_EQU, &fvar, 0);
+          uint8_t sel = fvar;
+          SCRIPT_SKIP_SPACES
+          if (*lp != ')') {
+            lp = GetNumericArgument(lp, OPER_EQU, &fvar, 0);
+          }
+          fvar = script_ow(sel, fvar);
+          goto nfuncexit;
+        }
+        break;
+#endif // USE_SCRIPT_ONEWIRE
 
       case 'p':
         if (!strncmp_XP(lp, XPSTR("pin["), 4)) {
@@ -4610,9 +4779,18 @@ extern void W8960_SetGain(uint8_t sel, uint16_t value);
               lp++;
             }
           }
+          bool isint = false;
+          if (*lp != '(') {
+            isint = is_int_var(lp);
+          }
           lp = GetNumericArgument(lp, OPER_EQU, &fvar, gv);
           char str[SCRIPT_MAXSSIZE];
-          f2char(fvar, dprec, lzero, str, dsep);
+          if (isint) {
+            double dvar = *(int32_t*)&fvar;
+            f2char(dvar, dprec, lzero, str, dsep);
+          } else {
+            f2char(fvar, dprec, lzero, str, dsep);
+          }
           if (sp) strlcpy(sp, str, glob_script_mem.max_ssize);
           lp++;
           len = 0;
@@ -4808,7 +4986,7 @@ extern char *SML_GetSVal(uint32_t index);
             fvar == -1;
           } else {
             if (Is_gpio_used(rxpin) || Is_gpio_used(txpin)) {
-              AddLog(LOG_LEVEL_INFO, PSTR("warning: pins already used"));
+              AddLog(LOG_LEVEL_INFO, PSTR("SCR: warning, pins already used"));
             }
 
             glob_script_mem.sp = new TasmotaSerial(rxpin, txpin, 1, 0, rxbsiz);
@@ -4820,10 +4998,10 @@ extern char *SML_GetSVal(uint32_t index);
 
               Settings->serial_config = sconfig;
               uint8_t uart = 0;
-#ifdef ESP32              
+#ifdef ESP32
               uart = glob_script_mem.sp->getUart();
 #endif
-              AddLog(LOG_LEVEL_INFO, PSTR("Serial port set to %s %d bit/s at rx=%d tx=%d rbu=%d uart=%d"), GetSerialConfig().c_str(), (uint32_t)br,  (uint32_t)rxpin, (uint32_t)txpin, (uint32_t)rxbsiz, uart);
+              AddLog(LOG_LEVEL_INFO, PSTR("SCR: Serial port set to %s %d bit/s at rx=%d tx=%d rbu=%d uart=%d"), GetSerialConfig().c_str(), (uint32_t)br,  (uint32_t)rxpin, (uint32_t)txpin, (uint32_t)rxbsiz, uart);
               Settings->serial_config = savc;
               if (rxpin == 3 and txpin == 1) ClaimSerial();
 
@@ -5163,7 +5341,7 @@ extern char *SML_GetSVal(uint32_t index);
             char cbuff[32];
             sprintf(cbuff," - %02x%02x",modbus_response[mb_index],modbus_response[mb_index+1]);
             strcat(hexbuff,cbuff);
-            AddLog(LOG_LEVEL_INFO,PSTR(">> %s"),hexbuff);
+            AddLog(LOG_LEVEL_INFO,PSTR("SCR: >> %s"),hexbuff);
 #endif
           }
           lp++;
@@ -5174,6 +5352,14 @@ extern char *SML_GetSVal(uint32_t index);
 
 #endif //USE_SCRIPT_SERIAL
 
+        if (!strncmp_XP(lp, XPSTR("sas("), 4)) {
+          lp = GetNumericArgument(lp + 4, OPER_EQU, &fvar, 0);
+          if (fvar < 1 || fvar > 3) {
+            fvar = 1;
+          }
+          script_sort_string_array(fvar - 1);
+          goto nfuncexit;
+        }
 
 #ifdef USE_SCRIPT_SPI
         if (!strncmp_XP(lp, XPSTR("spi("), 4)) {
@@ -5193,10 +5379,10 @@ extern char *SML_GetSVal(uint32_t index);
                 glob_script_mem.spi.settings = SPISettings(fvar, MSBFIRST, SPI_MODE0);
 
                 if (TasmotaGlobal.spi_enabled) {
-#ifdef EPS8266
+#ifdef ESP8266
                   SPI.begin();
                   glob_script_mem.spi.spip = &SPI;
-#endif // EPS8266
+#endif // ESP8266
 
 #ifdef ESP32
                   if (glob_script_mem.spi.sclk == -1) {
@@ -5209,7 +5395,7 @@ extern char *SML_GetSVal(uint32_t index);
 
 #endif // ESP32
                 } else {
-                  AddLog(LOG_LEVEL_INFO, PSTR("error: spi pins not defined"));
+                  AddLog(LOG_LEVEL_INFO, PSTR("SCR: error, spi pins not defined"));
                 }
                 break;
               }
@@ -5231,7 +5417,7 @@ extern char *SML_GetSVal(uint32_t index);
 
               if (Is_gpio_used(glob_script_mem.spi.mosi) || Is_gpio_used(glob_script_mem.spi.miso)
                   || Is_gpio_used(glob_script_mem.spi.sclk) ) {
-                AddLog(LOG_LEVEL_INFO, PSTR("warning: pins already used"));
+                AddLog(LOG_LEVEL_INFO, PSTR("SCR: warning, pins already used"));
               }
               break;
 
@@ -5245,7 +5431,7 @@ extern char *SML_GetSVal(uint32_t index);
               pinMode(glob_script_mem.spi.cs[index] , OUTPUT);
               digitalWrite(glob_script_mem.spi.cs[index] , 1);
               if (Is_gpio_used(glob_script_mem.spi.cs[index])) {
-                AddLog(LOG_LEVEL_INFO, PSTR("warning: pins already used"));
+                AddLog(LOG_LEVEL_INFO, PSTR("SCR: warning, pins already used"));
               }
               break;
 
@@ -5381,7 +5567,7 @@ extern char *SML_GetSVal(uint32_t index);
           uint32_t cycles;
           uint64_t accu = 0;
           char sbuffer[32];
-          
+
           GT911_Touch_Init(&Wire1, -1, -1, 960, 540);
 
           /*
@@ -5789,6 +5975,43 @@ char *getop(char *lp, uint8_t *operand) {
     return lp;
 }
 
+#ifdef USE_SCRIPT_FATFS_EXT
+#ifdef USE_UFILESYS
+int32_t script_logfile_write(char *path, char *payload, uint32_t size) {
+
+      File rfd = ufsp->open(path, FS_FILE_APPEND);
+      if (rfd == 0) {
+        return -1;
+      }
+
+      uint32_t fsize = rfd.size();
+      // append string
+      rfd.write((uint8_t*)payload, strlen(payload));
+      rfd.write((uint8_t*)"\n", 1);
+      if (fsize < size) {
+        rfd.close();
+        return fsize;
+      }
+      rfd.seek(0, SeekSet);
+      String line = rfd.readStringUntil('\n');
+      File wfd = ufsp->open("/ltmp", FS_FILE_WRITE);
+      if (!wfd) {
+        return -2;
+      }
+      while (rfd.available()) {
+        line = rfd.readStringUntil('\n');
+        wfd.write((uint8_t*)line.c_str(), line.length());
+        wfd.write((uint8_t*)"\n", 1);
+      }
+      rfd.close();
+      wfd.close();
+      ufsp->remove(path);
+      ufsp->rename("/ltmp", path);
+
+  return fsize;
+}
+#endif // USE_UFILESYS
+#endif // USE_SCRIPT_FATFS_EXT
 
 #ifdef ESP8266
 extern "C" {
@@ -6090,6 +6313,24 @@ extern "C" {
 
 #endif // USE_HOMEKIT
 
+
+bool is_int_var(char *name) {
+uint8_t vtype;
+struct T_INDEX ind;
+
+  isvar(name, &vtype, &ind, 0, 0, 0);
+
+  if (vtype != VAR_NV) {
+    if (vtype == NUM_RES || (vtype & STYPE) == 0) {
+      // numeric result
+      if (ind.bits.integer) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // replace vars in cmd %var%
 void Replace_Cmd_Vars(char *srcbuf, uint32_t srcsize, char *dstbuf, uint32_t dstsize) {
     char *cp;
@@ -6148,7 +6389,8 @@ void Replace_Cmd_Vars(char *srcbuf, uint32_t srcsize, char *dstbuf, uint32_t dst
                   if (vtype == NUM_RES || (vtype & STYPE) == 0) {
                     // numeric result
                     if (ind.bits.integer) {
-                      dtostrfd(*(int32_t*)&fvar, 0, string);
+                      double dval = *(int32_t*)&fvar;
+                      f2char(dval, dprec, lzero, string, dsep);
                     } else {
                       f2char(fvar, dprec, lzero, string, dsep);
                     }
@@ -6574,6 +6816,11 @@ startline:
         }
         // skip empty line
         SCRIPT_SKIP_EOL
+
+        while (*lp == '\t' || *lp == ' ') {
+          lp++;
+        }
+        
         // skip comment
         if (*lp == ';') goto next_line;
         if (!*lp) break;
@@ -6874,7 +7121,7 @@ getnext:
               lp = GetNumericArgument(lp + 6, OPER_EQU, &fvar, 0);
               int8_t pinnr = fvar;
               if (Is_gpio_used(pinnr)) {
-                AddLog(LOG_LEVEL_INFO, PSTR("warning: pins already used"));
+                AddLog(LOG_LEVEL_INFO, PSTR("SCR: warning, pins already used"));
               }
               SCRIPT_SKIP_SPACES
               uint8_t mode = 0;
@@ -7068,7 +7315,7 @@ getnext:
                   } else {
                     if (!sflag) {
                       tasm_cmd_activ = 1;
-                      AddLog(glob_script_mem.script_loglevel&0x7f, PSTR("Script: performs \"%s\""), tmp);
+                      AddLog(glob_script_mem.script_loglevel&0x7f, PSTR("SCR: performs \"%s\""), tmp);
                     } else if (sflag == 2) {
                       // allow recursive call
                     } else {
@@ -7147,6 +7394,7 @@ getnext:
                       } else {
                         dfvar = &glob_script_mem.fvars[index];
                         sysv_type = 0;
+                        glob_script_mem.res_ivar = ind.bits.integer;
                       }
                       numeric = 1;
                       SCRIPT_SKIP_SPACES
@@ -7217,7 +7465,7 @@ getnext:
                           default:
                               // error
                               break;
-                        } 
+                        }
                       } else {
                         switch (lastop) {
                           case OPER_EQU:
@@ -7262,7 +7510,7 @@ getnext:
                               break;
                         }
                       }
-                      
+
                       // var was changed
                       if (globvindex >= 0) SetChanged(globvindex);
 #ifdef USE_SCRIPT_GLOBVARS
@@ -7483,6 +7731,233 @@ getnext:
     return -1;
 }
 
+#ifdef USE_SCRIPT_ONEWIRE
+
+bool script_OneWireCrc8(uint8_t *addr) {
+  uint8_t crc = 0;
+  uint8_t len = 8;
+
+  while (len--) {
+    uint8_t inbyte = *addr++;          // from 0 to 7
+    for (uint32_t i = 8; i; i--) {
+      uint8_t mix = (crc ^ inbyte) & 0x01;
+      crc >>= 1;
+      if (mix) {
+        crc ^= 0x8C;
+      }
+      inbyte >>= 1;
+    }
+  }
+  return (crc == *addr);               // addr 8
+}
+
+uint32_t script_ow(uint8_t sel, uint32_t val) {
+uint32_t res = 0;
+uint8_t bits;
+bool invert = false;
+ScriptOneWire *ow = &glob_script_mem.ow;
+
+  if (sel >= 10 && sel <= 18) {
+      if (val < 1 || val > MAX_DS_SENSORS) {
+        val = 1;
+      }
+    return ow->ds_address[val - 1][sel - 10];
+  }
+
+  if (sel > 0 && (ow->ds == nullptr && ow->dsh == nullptr)) {
+    return 0xffff;
+  }
+
+  switch (sel) {
+    case 0:
+      if (val & 0x8000) {
+        if (val & 0x10000) {
+          // inverted serial
+          invert = true;
+        }
+        val &= 0x7fff;
+        ow->ts = new TasmotaSerial(val & 0xff, (val >> 8) & 0x7f, 1, 0, 64);
+        if (ow->ts) {
+
+          ow->ts->begin(9600);
+
+#ifdef ESP8266
+          if (ow->ts->hardwareSerial()) {
+            ClaimSerial();
+#ifdef ALLOW_OW_INVERT
+            if (invert == true) {
+              U0C0 = U0C0 | BIT(UCRXI) | BIT(UCTXI); // Inverse RX, TX
+            }
+#endif
+          }
+#endif // ESP8266
+
+#ifdef ESP32
+#ifdef ALLOW_OW_INVERT
+          if (invert == true) {
+            HardwareSerial *hws = ow->ts->getesp32hws();
+            hws->end();
+            hws->begin(9600, SERIAL_8N1, val & 0xff, (val >> 8) & 0x7f, true);
+          }
+#endif
+#endif // ESP32
+
+          ow->dsh = new DS2480B(ow->ts);
+          ow->dsh->begin();
+        }
+        ow->ds = nullptr;
+      } else {
+        ow->ds = new OneWire(val);
+        ow->dsh = nullptr;
+      }
+      break;
+    case 1:
+      if (ow->ds) {
+        ow->ds->reset();
+      } else {
+        ow->dsh->reset();
+      }
+      break;
+    case 2:
+      if (ow->ds) {
+        ow->ds->skip();
+      } else {
+        ow->dsh->skip();
+      }
+      break;
+    case 3:
+      if (ow->ds) {
+        ow->ds->write(val, 1);
+      } else {
+        ow->dsh->write(val, 1);
+      }
+      break;
+    case 4:
+      if (ow->ds) {
+        return ow->ds->read();
+      } else {
+        return ow->dsh->read();
+      }
+      break;
+    case 5:
+      if (ow->ds) {
+        ow->ds->reset_search();
+      } else {
+        ow->dsh->reset_search();
+      }
+      break;
+    case 6:
+      if (val < 1 || val > MAX_DS_SENSORS) {
+        val = 1;
+      }
+      if (ow->ds) {
+        return ow->ds->search(ow->ds_address[val - 1]);
+      } else {
+        return ow->dsh->search(ow->ds_address[val - 1]);
+      }
+      break;
+    case 7:
+      if (val < 1 || val > MAX_DS_SENSORS) {
+        val = 1;
+      }
+      if (ow->ds) {
+        ow->ds->select(ow->ds_address[val - 1]);
+      } else {
+        ow->dsh->select(ow->ds_address[val - 1]);
+      }
+      break;
+    case 8:
+      bits = val & 0xc0;
+      val &= 0x3f;
+      if (val < 1 || val > MAX_DS_SENSORS) {
+        val = 1;
+      }
+      if (ow->ds) {
+        ow->ds->reset();
+        ow->ds->select(ow->ds_address[val - 1]);
+        ow->ds->write(0xf5, 1);
+        ow->ds->write(0x0c, 1);
+        ow->ds->write(0xff, 1);
+        res = ow->ds->read();
+        ow->ds->write(bits, 1);
+      } else {
+        ow->dsh->reset();
+        ow->dsh->select(ow->ds_address[val - 1]);
+        ow->dsh->write(0xf5, 1);
+        ow->dsh->write(0x0c, 1);
+        ow->dsh->write(0xff, 1);
+        res = ow->dsh->read();
+        ow->dsh->write(bits, 1);
+      }
+      break;
+    case 9:
+      bits = val & 0x80;
+      val &= 0x3f;
+      if (val < 1 || val > MAX_DS_SENSORS) {
+        val = 1;
+      }
+
+      if (ow->ds) {
+        uint8_t data[9];
+        ow->ds->reset();
+        ow->ds->select(ow->ds_address[val - 1]);
+        if (!bits) {
+          ow->ds->write(0x44, 1);
+        } else {
+          ow->ds->write(0xbe, 1);
+          for (uint32_t cnt = 0; cnt < 9; cnt++) {
+            data[cnt] = ow->ds->read();
+          }
+          if (script_OneWireCrc8(data)) {
+            res = data[0];
+            res |= data[1] << 8;
+          } else {
+            res = 0;
+          }
+          ow->ds->reset();
+        }
+      } else {
+        uint8_t data[9];
+        ow->dsh->reset();
+        ow->dsh->select(ow->ds_address[val - 1]);
+        if (!bits) {
+          ow->dsh->write(0x44, 1);
+        } else {
+          ow->dsh->write(0xbe, 1);
+          for (uint32_t cnt = 0; cnt < 9; cnt++) {
+            data[cnt] = ow->dsh->read();
+          }
+          if (script_OneWireCrc8(data)) {
+            res = data[0];
+            res |= data[1] << 8;
+          } else {
+            res = 0;
+          }
+          ow->dsh->reset();
+        }
+      }
+      break;
+    case 99:
+      if (ow->ds) {
+        ow->ds->reset();
+        delete ow->ds;
+        ow->ds = nullptr;
+      } else {
+        ow->dsh->reset();
+        delete ow->dsh;
+        ow->dsh = nullptr;
+        delete ow->ts;
+      }
+      break;
+    case 98:
+      ow->ts->write(val);
+      break;
+  }
+  return res;
+}
+#endif // USE_SCRIPT_ONEWIRE
+
+
 
 #ifdef USE_SCRIPT_SPI
 // transfer 1-3 bytes
@@ -7585,6 +8060,25 @@ bool Script_Close_Serial() {
   return false;
 }
 #endif //USE_SCRIPT_SERIAL
+
+
+void script_sort_array(TS_FLOAT *array, uint16_t size) {
+  bool swapped;
+  do {
+    swapped = false;
+    for (uint16_t i = 0; i < size - 1; ++i) {
+      if (array[i] > array[i + 1]) {
+        // swap
+        TS_FLOAT tmp = array[i];
+        array[i] = array[i + 1];
+        array[i + 1] = tmp;
+        swapped = true;
+      }
+    }
+    size -= 1;
+  } while (swapped);
+}
+
 
 bool Is_gpio_used(uint8_t gpiopin) {
   if (gpiopin >= 0 && (gpiopin < nitems(TasmotaGlobal.gpio_pin)) && (TasmotaGlobal.gpio_pin[gpiopin] > 0)) {
@@ -7853,13 +8347,13 @@ uint8_t DownloadFile(char *file) {
   WiFiClient download_Client;
 
     if (!ufsp->exists(file)) {
-      AddLog(LOG_LEVEL_INFO,PSTR("file not found"));
+      AddLog(LOG_LEVEL_INFO,PSTR("SCR: file not found"));
       return 0;
     }
 
     download_file = ufsp->open(file, FS_FILE_READ);
     if (!download_file) {
-      AddLog(LOG_LEVEL_INFO,PSTR("could not open file"));
+      AddLog(LOG_LEVEL_INFO,PSTR("SCR: could not open file"));
       return 0;
     }
 
@@ -7987,11 +8481,11 @@ void SaveScript(void) {
 #ifdef EEP_SCRIPT_SIZE
   // here we handle EEPROM modes
   if (glob_script_mem.FLAGS.eeprom == true) {
-    if (EEP_SCRIPT_SIZE < SPECIAL_EEPMODE_SIZE) {
+    if (EEP_SCRIPT_SIZE < SPECIAL_EEPMODE_SIZE && EEP_SCRIPT_SIZE != SPI_FLASH_SEC_SIZE) {
       EEP_WRITE(0, EEP_SCRIPT_SIZE, glob_script_mem.script_ram);
     } else {
-#if EEP_SCRIPT_SIZE==SPI_FLASH_2SEC_SIZE
-      alt_eeprom_writeBytes(0, SPI_FLASH_2SEC_SIZE, (uint8_t*)glob_script_mem.script_ram);
+#if EEP_SCRIPT_SIZE==SPI_FLASH_2SEC_SIZE || EEP_SCRIPT_SIZE==SPI_FLASH_SEC_SIZE
+      alt_eeprom_writeBytes(0, EEP_SCRIPT_SIZE, (uint8_t*)glob_script_mem.script_ram);
 #else
       uint8_t *ucs;
       ucs = (uint8_t*)calloc(SPI_FLASH_SEC_SIZE + 4, 1);
@@ -8031,14 +8525,14 @@ void ScriptSaveSettings(void) {
     strlcpy(glob_script_mem.script_ram, str.c_str(), glob_script_mem.script_size);
 
     if (glob_script_mem.script_ram[0]!='>' && glob_script_mem.script_ram[1]!='D') {
-      AddLog(LOG_LEVEL_INFO, PSTR("script error: must start with >D"));
+      AddLog(LOG_LEVEL_INFO, PSTR("SCR: error, must start with >D"));
       bitWrite(Settings->rule_enabled, 0, 0);
     }
 
     SaveScript();
 
   } else {
-    AddLog(LOG_LEVEL_INFO, PSTR("script memory error"));
+    AddLog(LOG_LEVEL_INFO, PSTR("SCR: memory error"));
   }
 
   SaveScriptEnd();
@@ -8052,10 +8546,10 @@ uint32_t script_compress(char *dest, uint32_t size) {
   yield();
   if (len_compressed > 0) {
     dest[len_compressed] = 0;
-    AddLog(LOG_LEVEL_INFO,PSTR("script compressed to %d bytes = %d %%"),len_compressed,len_compressed * 100 / strlen(glob_script_mem.script_ram));
+    AddLog(LOG_LEVEL_INFO,PSTR("SCR: compressed to %d bytes = %d %%"),len_compressed,len_compressed * 100 / strlen(glob_script_mem.script_ram));
     return 0;
   } else {
-    AddLog(LOG_LEVEL_INFO, PSTR("script compress error: %d"), len_compressed);
+    AddLog(LOG_LEVEL_INFO, PSTR("SCR: compress error %d"), len_compressed);
     return 1;
   }
 }
@@ -8076,14 +8570,14 @@ void SaveScriptEnd(void) {
     glob_script_mem.script_mem_size = 0;
  #ifdef USE_SCRIPT_SERIAL
     Script_Close_Serial();
-#endif   
+#endif
   }
 
   if (bitRead(Settings->rule_enabled, 0)) {
 
     int16_t res = Init_Scripter();
     if (res) {
-      AddLog(LOG_LEVEL_INFO, PSTR("script init error: %d"), res);
+      AddLog(LOG_LEVEL_INFO, PSTR("SCR: init error %d"), res);
       return;
     }
 
@@ -8441,7 +8935,7 @@ void Script_Check_Hue(String *response) {
       }
       // append response
 #ifdef SCRIPT_HUE_DEBUG
-      AddLog(LOG_LEVEL_INFO, PSTR("Hue: %s - %d "),hue_script[hue_devs].name, hue_devs);
+      AddLog(LOG_LEVEL_INFO, PSTR("HUE: %s - %d "),hue_script[hue_devs].name, hue_devs);
 #endif
       if (response) {
         if (TasmotaGlobal.devices_present) {
@@ -8454,7 +8948,7 @@ void Script_Check_Hue(String *response) {
         *response += String(EncodeLightId(hue_devs + TasmotaGlobal.devices_present + 1))+"\":";
         Script_HueStatus(response, hue_devs);
 #ifdef SCRIPT_HUE_DEBUG
-        AddLog(LOG_LEVEL_INFO, PSTR("Hue: %s - %d "),response->c_str(), hue_devs);
+        AddLog(LOG_LEVEL_INFO, PSTR("HUE: %s - %d "),response->c_str(), hue_devs);
 #endif
       }
       hue_devs++;
@@ -8469,7 +8963,7 @@ void Script_Check_Hue(String *response) {
   }
 #ifdef SCRIPT_HUE_DEBUG
   if (response) {
-    AddLog(LOG_LEVEL_DEBUG, PSTR("Hue: %d"), hue_devs);
+    AddLog(LOG_LEVEL_INFO, PSTR("HUE: %d"), hue_devs);
     toLog(">>>>");
     toLog(response->c_str());
     toLog(response->c_str()+700);   // Was MAX_LOGSZ
@@ -8501,20 +8995,33 @@ void Script_Handle_Hue(String path) {
   uint8_t device = DecodeLightId(atoi(path.c_str()));
   uint8_t index = device - TasmotaGlobal.devices_present - 1;
 
+  uint16_t args = Webserver->args();
+
+#ifdef ESP82666
+  char *json = (char*)Webserver->arg(args - 1).c_str();
+#else
+   String request_arg = Webserver->arg(args - 1);
+   char *json = (char*)request_arg.c_str();
+#endif
+
+#ifdef SCRIPT_HUE_DEBUG
+  AddLog(LOG_LEVEL_INFO, PSTR("HUE: 0 %s - %d "),path.c_str(), device);
+  AddLog(LOG_LEVEL_INFO, PSTR("HUE: 1 %d, %s"), args, json);
+#endif
   if (Webserver->args()) {
     response = "[";
 
-    JsonParser parser((char*) Webserver->arg((Webserver->args())-1).c_str());
+    JsonParser parser(json);
     JsonParserObject root = parser.getRootObject();
     JsonParserToken hue_on = root[PSTR("on")];
-    if (hue_on) {
 
+    if (hue_on) {
       response += FPSTR(sHUE_LIGHT_RESPONSE_JSON);
       response.replace("{id", String(EncodeLightId(device)));
       response.replace("{cm", "on");
 
       bool on = hue_on.getBool();
-      if (on==false) {
+      if (on == false) {
         glob_script_mem.fvars[hue_script[index].index[0] - 1] = 0;
         response.replace("{re", "false");
       } else {
@@ -8800,7 +9307,7 @@ bool ScriptCommand(void) {
           break;
         case 8: // stop on error Off
         case 9: // On
-          bitWrite(Settings->rule_stop, index -1, XdrvMailbox.payload &1);
+          bitWrite(Settings->rule_stop, index - 1, XdrvMailbox.payload & 1);
           break;
 
 #ifdef xSCRIPT_STRIP_COMMENTS
@@ -8935,7 +9442,7 @@ bool ScriptMqttData(void) {
   String buData = XdrvMailbox.data;
 
 #ifdef DEBUG_MQTT_EVENT
-    AddLog(LOG_LEVEL_INFO, PSTR("Script: MQTT Topic %s, Event %s"), XdrvMailbox.topic, XdrvMailbox.data);
+    AddLog(LOG_LEVEL_INFO, PSTR("SCR: MQTT Topic %s, Event %s"), XdrvMailbox.topic, XdrvMailbox.data);
 #endif
 
   MQTT_Subscription event_item;
@@ -8947,7 +9454,7 @@ bool ScriptMqttData(void) {
     String sData = buData;
 
 #ifdef DEBUG_MQTT_EVENT
-    AddLog(LOG_LEVEL_INFO, PSTR("Script: Match MQTT message Topic %s with subscription topic %s and key %s"), sTopic.c_str(), event_item.Topic.c_str(),event_item.Key.c_str());
+    AddLog(LOG_LEVEL_INFO, PSTR("SCR: Match MQTT message Topic %s with subscription topic %s and key %s"), sTopic.c_str(), event_item.Topic.c_str(),event_item.Key.c_str());
 #endif
     if (sTopic.startsWith(event_item.Topic)) {
       //This topic is subscribed by us, so serve it
@@ -9005,7 +9512,7 @@ bool ScriptMqttData(void) {
           snprintf_P(sbuffer, sizeof(sbuffer), PSTR(">%s=\"%s\"\n"), event_item.Event.c_str(), value.c_str());
         }
 #ifdef DEBUG_MQTT_EVENT
-        AddLog(LOG_LEVEL_INFO, PSTR("Script: setting script var %s"), sbuffer);
+        AddLog(LOG_LEVEL_INFO, PSTR("SCR: setting script var %s"), sbuffer);
 #endif
         //toLog(sbuffer);
         execute_script(sbuffer);
@@ -9168,7 +9675,7 @@ void ScriptServeFile82(void) {
       if (ufsp->exists(cp)) {
 #endif
         if (download82_busy == true) {
-          AddLog(LOG_LEVEL_INFO, PSTR("UFS 82: Download is busy"));
+          AddLog(LOG_LEVEL_INFO, PSTR("UFS: 82 Download is busy"));
           return;
         }
         download82_busy = true;
@@ -9216,9 +9723,9 @@ void WebServer82Init(void) {
     http82_Server->on("/", HTTP_GET, Handle82Root);
     http82_Server->onNotFound(Handle82NotFound);
     http82_Server->begin();
-    AddLog(LOG_LEVEL_INFO, PSTR("HTTP DL Server started on port: %d "), SCRIPT_DLPORT);
+    AddLog(LOG_LEVEL_INFO, PSTR("SCR: HTTP DL Server started on port: %d "), SCRIPT_DLPORT);
   } else {
-    AddLog(LOG_LEVEL_INFO, PSTR("HTTP DL Server failed"));
+    AddLog(LOG_LEVEL_INFO, PSTR("SCR: HTTP DL Server failed"));
   }
 }
 
@@ -9673,6 +10180,11 @@ void Script_Check_HTML_Setvars(void) {
     *cp1 = '=';
     cp1++;
 
+    if (is_int_var(vname)) {
+      memmove(cp1 + 1, cp1, strlen(cp1));
+      *cp1++ = '#';
+    }
+
     struct T_INDEX ind;
     uint8_t vtype;
     isvar(vname, &vtype, &ind, 0, 0, 0);
@@ -9727,6 +10239,16 @@ const char SCRIPT_MSG_PULLDOWNb[] PROGMEM =
   "<option %s value='%d'>%s</option>";
 const char SCRIPT_MSG_PULLDOWNc[] PROGMEM =
   "</select>";
+
+const char SCRIPT_MSG_RADIOa[] PROGMEM =
+  "%s<fieldset style='width:%dpx'><legend>%s</legend>";
+const char SCRIPT_MSG_RADIOa0[] PROGMEM =
+  "%s<fieldset><legend>%s</legend>";
+const char SCRIPT_MSG_RADIOb[] PROGMEM =
+  "<div align='left'><input type='radio' name='%s' onclick='seva(%d%,\"%s\")'%s>"
+	"<label>%s</label></div>";
+const char SCRIPT_MSG_RADIOc[] PROGMEM =
+  "</fieldset>";
 
 const char SCRIPT_MSG_TEXTINP[] PROGMEM =
   "%s<label><b>%s</b><input type='text'  value='%s' style='width:%dpx'  onfocusin='pr(0)' onfocusout='pr(1)' onchange='siva(value,\"%s\")'></label>";
@@ -9918,6 +10440,7 @@ uint32_t cnt;
 #define WSO_NODIV 2
 #define WSO_FORCEPLAIN 4
 #define WSO_FORCEMAIN 8
+#define WSO_FORCEGUI 16
 #define WSO_STOP_DIV 0x80
 
 void WCS_DIV(uint8_t flag) {
@@ -10068,7 +10591,7 @@ int32_t web_send_file(char mc, char *fname) {
     free(lbuff);
     return 0;
   } else {
-    AddLog(LOG_LEVEL_INFO, PSTR("WEB file %s not found"), path);
+    AddLog(LOG_LEVEL_INFO, PSTR("SCR: WEB file %s not found"), path);
   }
   free(lbuff);
 #endif
@@ -10099,7 +10622,10 @@ const char *gc_str;
     strcpy_P(center, PSTR("<center>"));
   }
 
-  if ( ((!mc && (*lin != '$')) || (mc == 'w' && (*lin != '$'))) && (!(specopt & WSO_FORCEMAIN)) ) {
+  bool dogui = ((!mc && (*lin != '$')) || (mc == 'w' && (*lin != '$'))) && (!(specopt & WSO_FORCEMAIN));
+
+  if ((dogui && !(specopt & WSO_FORCEGUI)) || (!dogui && (specopt & WSO_FORCEGUI))) {
+  //if ( ((!mc && (*lin != '$')) || (mc == 'w' && (*lin != '$'))) && (!(specopt & WSO_FORCEMAIN)) || (specopt & WSO_FORCEGUI)) {
     // normal web section
     //AddLog(LOG_LEVEL_INFO, PSTR("normal %s"), lin);
     if (*lin == '@') {
@@ -10143,7 +10669,7 @@ const char *gc_str;
       lp = GetStringArgument(lp, OPER_EQU, right, 0);
       SCRIPT_SKIP_SPACES
 
-      WSContentSend_P(SCRIPT_MSG_SLIDER, left,mid, right, (uint32_t)min, (uint32_t)max, (uint32_t)val, vname);
+      WSContentSend_P(SCRIPT_MSG_SLIDER, left, mid, right, (uint32_t)min, (uint32_t)max, (uint32_t)val, vname);
       lp++;
 
     } else if (!strncmp(lin, "ck(", 3)) {
@@ -10243,6 +10769,62 @@ const char *gc_str;
       }
       WSContentSend_P(SCRIPT_MSG_PULLDOWNc);
       WCS_DIV(specopt | WSO_STOP_DIV);
+    } else if (!strncmp(lin, "rb(", 3)) {
+      // radio buttons
+      char *lp = lin + 3;
+      char *slp = lp;
+      TS_FLOAT val;
+      lp = GetNumericArgument(lp, OPER_EQU, &val, 0);
+      SCRIPT_SKIP_SPACES
+
+      char vname[16];
+      ScriptGetVarname(vname, slp, sizeof(vname));
+
+      SCRIPT_SKIP_SPACES
+      char pulabel[SCRIPT_MAXSSIZE];
+      lp = GetStringArgument(lp, OPER_EQU, pulabel, 0);
+      SCRIPT_SKIP_SPACES
+
+      glob_script_mem.glob_error = 0;
+      int16_t tsiz = -1;
+      TS_FLOAT fvar;
+      char *slp1 = lp;
+      lp = GetNumericArgument(lp, OPER_EQU, &fvar, 0);
+      if (!glob_script_mem.glob_error) {
+        tsiz = fvar;
+      } else {
+        lp = slp1;
+      }
+
+      WCS_DIV(specopt);
+      if (tsiz < 0) {
+        WSContentSend_P(SCRIPT_MSG_RADIOa0, center, pulabel);
+      } else {
+        WSContentSend_P(SCRIPT_MSG_RADIOa, center, tsiz, pulabel);
+      }
+
+      // get pu labels
+      uint8_t index = 1;
+      while (*lp) {
+        SCRIPT_SKIP_SPACES
+        lp = GetStringArgument(lp, OPER_EQU, pulabel, 0);
+        char *cp;
+        if (val == index) {
+          cp = (char*)"checked";
+        } else {
+          cp = (char*)"";
+        }
+        WSContentSend_P(SCRIPT_MSG_RADIOb, vname, index, vname, cp, pulabel);
+        SCRIPT_SKIP_SPACES
+        if (*lp == ')') {
+          lp++;
+          break;
+        }
+        index++;
+      }
+      WSContentSend_P(SCRIPT_MSG_RADIOc);
+      WCS_DIV(specopt | WSO_STOP_DIV);
+      WSContentFlush();
     } else if (!strncmp(lin, "bu(", 3)) {
       char *lp = lin + 3;
       uint8_t bcnt = 0;
@@ -10400,6 +10982,8 @@ const char *gc_str;
       char vname[16];
       ScriptGetVarname(vname, slp, sizeof(vname));
 
+      bool isint = is_int_var(vname);
+
       char label[SCRIPT_MAXSSIZE];
       lp = GetStringArgument(lp, OPER_EQU, label, 0);
       SCRIPT_SKIP_SPACES
@@ -10417,10 +11001,17 @@ const char *gc_str;
       }
 
       char vstr[16],minstr[16],maxstr[16],stepstr[16];
-      dtostrfd(val, dprec, vstr);
-      dtostrfd(min, dprec, minstr);
-      dtostrfd(max, dprec, maxstr);
-      dtostrfd(step, dprec, stepstr);
+      if (isint) {
+        dtostrfd(*(int32_t*)&val, 0, vstr);
+        dtostrfd(*(int32_t*)&min, dprec, minstr);
+        dtostrfd(*(int32_t*)&max, dprec, maxstr);
+        dtostrfd(*(int32_t*)&step, dprec, stepstr);
+      } else {
+        dtostrfd(val, dprec, vstr);
+        dtostrfd(min, dprec, minstr);
+        dtostrfd(max, dprec, maxstr);
+        dtostrfd(step, dprec, stepstr);
+      }
       WCS_DIV(specopt);
       WSContentSend_P(SCRIPT_MSG_NUMINP, center, label, minstr, maxstr, stepstr, vstr, tsiz, vname);
       WCS_DIV(specopt | WSO_STOP_DIV);
@@ -10441,11 +11032,11 @@ const char *gc_str;
   } else {
     //  main section interface
     //AddLog(LOG_LEVEL_INFO, PSTR("main %s"), lin);
-    if ( (*lin == mc) || (mc == 'z') || (specopt&WSO_FORCEMAIN)) {
+    if ( (*lin == mc) || (mc == 'z') || (specopt & WSO_FORCEMAIN)) {
 
 #ifdef USE_GOOGLE_CHARTS
       if (mc != 'z') {
-        if (!(specopt&WSO_FORCEMAIN)) {
+        if (!(specopt & WSO_FORCEMAIN)) {
           lin++;
         }
       }
@@ -10867,8 +11458,11 @@ exgc:
         WSContentSend_P(PSTR("%s"), lin);
       }
 #else
-      if (!(specopt&WSO_FORCEMAIN)) {
-        lin++;
+
+      if (mc != 'z') {
+        if (!(specopt & WSO_FORCEMAIN)) {
+          lin++;
+        }
       }
       WSContentSend_P(PSTR("%s"), lin);
     } else {
@@ -11191,7 +11785,7 @@ int32_t url2file(uint8_t fref, char *url) {
     }
   }
   if (httpCode < 0) {
-    AddLog(LOG_LEVEL_INFO,PSTR("HTTP error %d = %s"), httpCode, http.errorToString(httpCode).c_str());
+    AddLog(LOG_LEVEL_INFO,PSTR("SCR: HTTP error %d = %s"), httpCode, http.errorToString(httpCode).c_str());
   }
   if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
     WiFiClient *stream = http.getStreamPtr();
@@ -11207,7 +11801,7 @@ int32_t url2file(uint8_t fref, char *url) {
         uint32_t read = stream->readBytes(buff, size);
         glob_script_mem.files[fref].write(buff, read);
         len -= read;
-        AddLog(LOG_LEVEL_DEBUG,PSTR("HTTP read %d"), len);
+        AddLog(LOG_LEVEL_DEBUG,PSTR("SCR: HTTP read %d"), len);
       }
       delayMicroseconds(1);
     }
@@ -11233,7 +11827,7 @@ int32_t http_req(char *host, char *request) {
   }
 
 #ifdef HTTP_DEBUG
-  AddLog(LOG_LEVEL_INFO, PSTR("HTTP heap %d"), ESP_getFreeHeap());
+  AddLog(LOG_LEVEL_INFO, PSTR("SCR: HTTP heap %d"), ESP_getFreeHeap());
 #endif
 
   if (!mode) {
@@ -11251,7 +11845,7 @@ int32_t http_req(char *host, char *request) {
   }
 
 #ifdef HTTP_DEBUG
-  AddLog(LOG_LEVEL_INFO, PSTR("HTTP RESULT %s"), http.getString().c_str());
+  AddLog(LOG_LEVEL_INFO, PSTR("SCR: HTTP RESULT %s"), http.getString().c_str());
 #endif
 
 #ifdef USE_WEBSEND_RESPONSE
@@ -11262,7 +11856,7 @@ int32_t http_req(char *host, char *request) {
 #endif
 
 #ifdef HTTP_DEBUG
-  AddLog(LOG_LEVEL_INFO, PSTR("HTTP MQTT BUFFER %s"), ResponseData());
+  AddLog(LOG_LEVEL_INFO, PSTR("SCR: HTTP MQTT BUFFER %s"), ResponseData());
 #endif
 
 //  AddLog(LOG_LEVEL_INFO, PSTR("JSON %s"), wd_jstr);
@@ -11296,7 +11890,7 @@ int32_t call2pwl(const char *url) {
   if (*url == 'N') {
     url++;
     cookie = "";
-  } 
+  }
   String result = powerwall.GetRequest(String(url), cookie);
   //AddLog(LOG_LEVEL_INFO, PSTR("PWL: result: %s"), result.c_str());
 
@@ -11305,9 +11899,26 @@ int32_t call2pwl(const char *url) {
   result.replace("instant", "i");
   result.replace("apparent", "a");
   result.replace("reactive", "r");
+
+// custom replace
+#ifdef TESLA_POWERWALL_CTS1
+  result.replace(TESLA_POWERWALL_CTS1, "PW_CTS1");
+#endif
+
+#ifdef TESLA_POWERWALL_CTS2
+  result.replace(TESLA_POWERWALL_CTS2, "PW_CTS2");
+#endif
+
   if (result.length()>4095) {
     AddLog(LOG_LEVEL_INFO, PSTR("PWL: result overflow: %d"), result.length());
   }
+
+
+#ifdef MQTT_DATA_STRING
+  TasmotaGlobal.mqtt_data = result;
+#else
+  strncpy(TasmotaGlobal.mqtt_data, result.c_str(), MESSZ);
+#endif
 
   // meter aggregates has also too many tokens
   char *cp = (char*)result.c_str();
@@ -11371,7 +11982,7 @@ uint32_t call2https(const char *host, const char *path) {
   if (retry == 10) {
     return 2;
   }
-  AddLog(LOG_LEVEL_DEBUG,PSTR("connected"));
+  AddLog(LOG_LEVEL_DEBUG,PSTR("SCR: connected"));
 
   String request;
 
@@ -11415,36 +12026,38 @@ void cpy2lf(char *dst, uint32_t dstlen, char *src) {
 }
 
 #ifdef USE_SCRIPT_I2C
-uint8_t script_i2c_addr;
-TwoWire *script_i2c_wire;
 uint32_t script_i2c(uint8_t sel, uint16_t val, uint32_t val1) {
   uint32_t rval = 0;
   uint8_t bytes = 1;
 
+  if (sel > 0) {
+    if (!glob_script_mem.script_i2c_wire) return 0;
+  }
+
   switch (sel) {
     case 0:
-      script_i2c_addr = val;
+      glob_script_mem.script_i2c_addr = val;
 #ifdef ESP32
-      if (val1 == 0) script_i2c_wire = &Wire;
-      else script_i2c_wire = &Wire1;
+      if (val1 == 0) glob_script_mem.script_i2c_wire = &Wire;
+      else glob_script_mem.script_i2c_wire = &Wire1;
 #else
-      script_i2c_wire = &Wire;
+      glob_script_mem.script_i2c_wire = &Wire;
 #endif
-      script_i2c_wire->beginTransmission(script_i2c_addr);
-      return (0 == script_i2c_wire->endTransmission());
+      glob_script_mem.script_i2c_wire->beginTransmission(glob_script_mem.script_i2c_addr);
+      return (0 == glob_script_mem.script_i2c_wire->endTransmission());
       break;
     case 2:
       // read 1..4 bytes
       if ((val & 0x8000) == 0) {
-        script_i2c_wire->beginTransmission(script_i2c_addr);
-        script_i2c_wire->write(val);
-        script_i2c_wire->endTransmission();
+        glob_script_mem.script_i2c_wire->beginTransmission(glob_script_mem.script_i2c_addr);
+        glob_script_mem.script_i2c_wire->write(val);
+        glob_script_mem.script_i2c_wire->endTransmission();
       }
-      script_i2c_wire->requestFrom((int)script_i2c_addr, (int)val1);
+      glob_script_mem.script_i2c_wire->requestFrom((int)glob_script_mem.script_i2c_addr, (int)val1);
 
       for (uint8_t cnt = 0; cnt < val1; cnt++) {
         rval <<= 8;
-        rval |= (uint8_t)script_i2c_wire->read();
+        rval |= (uint8_t)glob_script_mem.script_i2c_wire->read();
       }
       break;
 
@@ -11454,23 +12067,23 @@ uint32_t script_i2c(uint8_t sel, uint16_t val, uint32_t val1) {
     case 13:
       // write 1 .. 4 bytes
       bytes = sel - 9;
-      script_i2c_wire->beginTransmission(script_i2c_addr);
+      glob_script_mem.script_i2c_wire->beginTransmission(glob_script_mem.script_i2c_addr);
       if ((val & 0x8000) == 0) {
-        script_i2c_wire->write(val);
+        glob_script_mem.script_i2c_wire->write(val);
       }
       if ((val & 0x4000) == 0) {
         for (uint8_t cnt = 0; cnt < bytes; cnt++) {
-          script_i2c_wire->write(val1);
+          glob_script_mem.script_i2c_wire->write(val1);
           val1 >>= 8;
         }
       } else {
         uint32_t wval = 0;
         for (uint8_t cnt = 0; cnt < bytes; cnt++) {
           wval = val1 >> ((bytes - 1 - cnt) * 8);
-          script_i2c_wire->write(wval);
+          glob_script_mem.script_i2c_wire->write(wval);
         }
       }
-      script_i2c_wire->endTransmission();
+      glob_script_mem.script_i2c_wire->endTransmission();
       break;
 
   }
@@ -11915,9 +12528,13 @@ bool Xdrv10(uint32_t function)
 
   switch (function) {
     //case FUNC_PRE_INIT:
-    case FUNC_INIT:
+    //case FUNC_INIT:
+    case FUNC_SETUP_RING1:  // We need to setup SCRIPT before call to ScriptLoadSection()
 
       //bitWrite(Settings->rule_enabled, 0, 0); // >>>>>>>>>>>
+#ifndef NO_SCRIPT_STOP_ON_ERROR
+      bitWrite(Settings->rule_stop, 0, 1);
+#endif
 
       // set defaults to rules memory
       //bitWrite(Settings->rule_enabled,0,0);
@@ -11931,7 +12548,7 @@ bool Xdrv10(uint32_t function)
 #ifdef USE_UFILESYS
       if (ufs_type) {
         // we have a file system
-        AddLog(LOG_LEVEL_INFO,PSTR("UFILESYSTEM OK!"));
+        AddLog(LOG_LEVEL_INFO,PSTR("SCR: ufilesystem found"));
         char *script;
         script = (char*)special_malloc(UFSYS_SIZE + 4);
         if (!script) break;
@@ -11951,7 +12568,7 @@ bool Xdrv10(uint32_t function)
         // indicates scripter use no compression
         bitWrite(Settings->rule_once, 6, 0);
       } else {
-        AddLog(LOG_LEVEL_INFO,PSTR("UFILESYSTEM fail, using compression!"));
+        AddLog(LOG_LEVEL_INFO,PSTR("SCR: No ufilesystem, using compression"));
         int32_t len_decompressed;
         sprt = (char*)calloc(UNISHOXRSIZE + 8,1);
         if (!sprt) { break; }
@@ -11969,7 +12586,7 @@ bool Xdrv10(uint32_t function)
       if (EEP_INIT(EEP_SCRIPT_SIZE)) {
           // found 32kb eeprom,
           char *script;
-#if EEP_SCRIPT_SIZE<SPECIAL_EEPMODE_SIZE
+#if EEP_SCRIPT_SIZE<SPECIAL_EEPMODE_SIZE && EEP_SCRIPT_SIZE!=SPI_FLASH_SEC_SIZE
             script = (char*)calloc(EEP_SCRIPT_SIZE + 4, 1);
             if (!script) break;
             glob_script_mem.script_ram = script;
@@ -11981,16 +12598,16 @@ bool Xdrv10(uint32_t function)
             script[EEP_SCRIPT_SIZE - 1] = 0;
 #else
             uint8_t *ucs;
-#if EEP_SCRIPT_SIZE==SPI_FLASH_2SEC_SIZE
-            ucs = (uint8_t*)calloc(SPI_FLASH_2SEC_SIZE + 4, 1);
+#if EEP_SCRIPT_SIZE==SPI_FLASH_2SEC_SIZE || EEP_SCRIPT_SIZE==SPI_FLASH_SEC_SIZE
+            ucs = (uint8_t*)calloc(EEP_SCRIPT_SIZE + 4, 1);
             if (!ucs) break;
-            alt_eeprom_readBytes(0, SPI_FLASH_2SEC_SIZE, ucs);
+            alt_eeprom_readBytes(0, EEP_SCRIPT_SIZE, ucs);
             if (*ucs == 0xff) {
-              memset(ucs, SPI_FLASH_2SEC_SIZE, 0);
+              memset(ucs, EEP_SCRIPT_SIZE, 0);
             }
-            ucs[SPI_FLASH_2SEC_SIZE- 1] = 0;
+            ucs[EEP_SCRIPT_SIZE - 1] = 0;
             glob_script_mem.script_ram = (char*)ucs;
-            glob_script_mem.script_size = SPI_FLASH_2SEC_SIZE;
+            glob_script_mem.script_size = EEP_SCRIPT_SIZE;
 
 #else
             ucs = (uint8_t*)calloc(SPI_FLASH_SEC_SIZE + 4, 1);
@@ -12048,9 +12665,9 @@ bool Xdrv10(uint32_t function)
 #endif //USE_BUTTON_EVENT
 
       // a valid script MUST start with >D
-      if (glob_script_mem.script_ram[0]!='>' && glob_script_mem.script_ram[1]!='D') {
+      if (glob_script_mem.script_ram[0] != '>' && glob_script_mem.script_ram[1] != 'D') {
         // clr all
-        memset(glob_script_mem.script_ram, 0 ,glob_script_mem.script_size);
+        memset(glob_script_mem.script_ram, 0, glob_script_mem.script_size);
 #ifdef PRECONFIGURED_SCRIPT
         strcpy_P(glob_script_mem.script_ram, PSTR(PRECONFIGURED_SCRIPT));
 #else
@@ -12073,8 +12690,8 @@ bool Xdrv10(uint32_t function)
 
       if (bitRead(Settings->rule_enabled, 0)) Init_Scripter();
 
-    //  break;
-    //case FUNC_INIT:
+      break;
+    case FUNC_INIT:
       if (bitRead(Settings->rule_enabled, 0)) {
         set_callbacks();
         Run_Scripter1(">B\n", 3, 0);
@@ -12224,6 +12841,10 @@ bool Xdrv10(uint32_t function)
         }
       }
       break;
+    case FUNC_BUTTON_MULTI_PRESSED:
+      if (bitRead(Settings->rule_enabled, 0)) {
+        Run_Scripter1(">b", 2, 0);
+      }
 #endif //USE_BUTTON_EVENT
 
     case FUNC_LOOP:
